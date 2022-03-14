@@ -12,11 +12,12 @@ class Gateway:
                     12:np.array([-136,-133,-130])}
     SNR = { 7:-7.5, 8:-10, 9:-12.5,10:-15,11:-17.5,12:-20}
     SNR_THRESHOLD = 5
-    NO_CHANNELS = 2
+    NO_CHANNELS = 64
 
-    def __init__(self, id, location, sim_env):
+    def __init__(self, id, location, idx, sim_env):
         self.id = id
         self.location = location
+        self.idx = idx
         self.channels = range(Gateway.NO_CHANNELS) #only listen to channel 0-7
         self.sim_env = sim_env
         self.num_of_packet_received = 0

@@ -9,15 +9,6 @@ from framework.Gateway import  Gateway
 
 DEBUG = False
 
-num_steps = 1000
-step_time = 6000  # ms
-offset = 3000
-fire_update = 18000
-config = 'random1'
-
-gateway_location, node_locations, connection, distance = load_config(config)
-simulation = Simulation(node_locations, gateway_location, step_time, connection, config, distance, num_steps, offset=offset, update_rate=fire_update)
-
 # dT = np.diff(simulation.environment.T_field, axis=0)
 # print(np.max(dT))
 #

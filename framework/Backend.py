@@ -9,17 +9,14 @@ from .utils import PacketInformation
 from .FieldReconstruction import FieldReconstructor
 
 class Application:
-    def __init__(self, node_ids, connection, field_update):
-        self.fusion_center = FieldReconstructor(node_ids, connection, field_update)
+    def __init__(self, environment):
+        self.fusion_center = FieldReconstructor(environment)
 
     def run(self, info):
-        temp = info.payload['value']
-        time = info.payload['time']
-        self.fusion_center.update(info.node_id, temp, time)
-
+        self.fusion_center.update(info)
 
     def reset(self):
-        self.data = {}
+        self.fusion_center.reset()
 
 
 class Server:

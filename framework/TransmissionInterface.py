@@ -47,7 +47,7 @@ class AirInterface:
         if self.snr_model is None:
             self.snr_model = SNRModel()
 
-    def transmit(self, p):
+    def transmit(self, p, skip_lora=False):
         dispatch = [self.sim_env.event() for i in range(len(self.gateways))]
         self.sim_env.process(self.server.receive_from_gateway(p, dispatch))
 

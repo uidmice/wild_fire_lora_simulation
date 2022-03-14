@@ -1,6 +1,7 @@
 import simpy
 import random
-from collections import deque
+import matplotlib.pyplot as plt
+
 
 from framework.utils import Location
 from framework.Node import Node, EnergyProfile
@@ -9,99 +10,69 @@ from framework.TransmissionInterface import AirInterface
 from framework.Backend import Server, Application
 from framework.LoRaParameters import LoRaParameters
 from framework.Environment import *
-import os.path
-import pickle
+from config import *
+
 
 class Simulation:
-    ENVIRONMENT_TYPE = ["temp"]
-
-    def __init__(self, nodes_positions, gateway_positions, step_time, connection, config_name, distance, num_steps, environment="temp", offset=2000, update_rate = UPDATA_RATE):
+    def __init__(self, node_indexes, gateway_indexes, step_time, environment, offset=2000):
         self.nodes = []
         self.gateways = []
         assert step_time >= offset + 3000
         self.step_time = step_time
         self.offset = offset
-        self.steps = 0
-        self.name = config_name + "_update_" + str(update_rate)
-        self.update_rate = update_rate
-        self.num_steps = num_steps
         self.sim_env = simpy.Environment()
         self.channel_nodes = {}
         for channel in range(Gateway.NO_CHANNELS):
             self.channel_nodes[channel] = []
-        assert environment in Simulation.ENVIRONMENT_TYPE
-        if environment == "temp":
-            self.environment = TempEnvironment( Location(distance, -distance),
-                                               Location(-distance, distance), 296.15, self.num_steps * self.step_time, update_rate, dx=GRID)
-        else:
-            assert False, "%s environment is not implemented" %(environment)
-        link = []
-        for loc in connection:
-            for l2 in connection[loc]:
-                link.append([nodes_positions.index(loc), nodes_positions.index(l2)])
-        self.app = Application(list(range(len(nodes_positions))), link, update_rate)
+        self.environment=environment
+        self.steps = 0
+
+        self.app = Application(self.environment)
         self.server = Server(self.gateways, self.sim_env, self.app)
         self.air_interface = AirInterface(self.sim_env, self.gateways, self.server)
-        config_file = './config/'+config_name+'_lora_'+ str(Gateway.NO_CHANNELS) +'.pickle'
-        lora_para_exist = False
-        # if os.path.exists(config_file):
-        if False:
-            lora_para = pickle.load(open(config_file, 'rb'))
-            lora_para_exist = True
-        else:
-            lora_para_exist = True
-            lora_para = [ LoRaParameters(i % Gateway.NO_CHANNELS, sf=9 + i %2) for i in range(len(nodes_positions))]
-        for i in range(len(nodes_positions)):
+
+
+        lora_para = [LoRaParameters(i % Gateway.NO_CHANNELS, sf=7 + i %4) for i in range(len(node_indexes))]
+        for i, idx in enumerate(node_indexes):
             node = Node(i, EnergyProfile(0.1), lora_para[i],
-                                   self.air_interface, self.sim_env, nodes_positions[i], True)
+                                   self.air_interface, self.sim_env, Location(environment.grass_r.north-idx.row*environment.grass_r.nsres, idx.col*environment.grass_r.ewres + environment.grass_r.west), idx, True)
             self.channel_nodes[lora_para[i].channel].append(node)
-            node.last_payload_sent = self.environment.sense(nodes_positions[i], self.sim_env.now)
+            node.last_payload_sent = self.environment.sense(idx.row, idx.col, self.sim_env.now * SIMPY_TO_GRASS_TIME_FACTOR)
             self.nodes.append(node)
-        for i in range(len(gateway_positions)):
-            self.gateways.append(Gateway(i, gateway_positions[i], self.sim_env))
+        for i, idx in enumerate(gateway_indexes):
+            self.gateways.append(Gateway(i, Location(idx.row*environment.grass_r.nsres + environment.grass_r.south, idx.col*environment.grass_r.ewres + environment.grass_r.west), idx, self.sim_env))
 
         self.constructed_field = {}
         self.real_field = {}
         self.temp_field = None
 
-        if not lora_para_exist:
-            print("Start generating new lora configuration file for " + config_name)
-            self.pre_adr(1000, True, percentage=0.4)
-            pickle.dump([n.para for n in self.nodes], open(config_file, 'wb'))
-            self.reset()
-
-
 
     def node_states(self, *args, **kwargs):
         return list(a.get_status(*args, **kwargs) for a in self.nodes)
 
-    def step(self, actions):
+    def step(self, actions, skip_lora=False):
         assert len(self.nodes) == len(actions)
         assert self.sim_env.now == self.steps * self.step_time
-        self.constructed_field = self.field_reconstruction()
-        self.temp_field = self.environment.T_field[int(self.sim_env.now//self.update_rate)]
         self.steps += 1
         send_index = [idx for idx, send in enumerate(actions) if send]
         for i in range(len(self.nodes)):
-            self.sim_env.process(self._node_send_sensed_value(i, actions[i]))
+            self.sim_env.process(self._node_send_sensed_value(i, actions[i], skip_lora))
         self.sim_env.run(self.step_time * self.steps)
         received = []
         for i in send_index:
             if self.nodes[i].packet_to_send.received:
                 received.append(i)
-                # if self.nodes[i].last_payload_change:
-                #     reward += np.exp(-20/np.absolute(self.nodes[i].last_payload_change))
         return send_index, received
 
-    def _node_send_sensed_value(self, node_index, send):
+    def _node_send_sensed_value(self, node_index, send, skip_lora):
         node = self.nodes[node_index]
-        value = node.sense(self.environment)
-        self.real_field[node_index] = value
-        time = self.sim_env.now
+        data = node.sense(self.environment)
         yield self.sim_env.timeout(np.random.randint(self.offset))
         if send:
-            packet = node.create_unique_packet({'value':value, 'time': time}, False, False)
-            yield self.sim_env.process(node.send(packet))
+            data['x'] = node.location.x
+            data['y'] = node.location.y
+            packet = node.create_unique_packet(data, False, False)
+            yield self.sim_env.process(node.send(packet, skip_lora))
         yield self.sim_env.timeout(self.step_time * self.steps - self.sim_env.now)
 
     def _node_send_test(self, node_index):
@@ -110,6 +81,9 @@ class Simulation:
         packet = node.create_unique_packet(None, True, True)
         yield self.sim_env.process(node.send(packet))
         yield self.sim_env.timeout(self.step_time * self.steps - self.sim_env.now)
+
+    def get_grass_time(self):
+        return self.steps * self.step_time * SIMPY_TO_GRASS_TIME_FACTOR
 
     def pre_adr(self, rounds: int, show=False, percentage=0.8):
         assert rounds > 50
@@ -183,9 +157,10 @@ class Simulation:
     def reset(self, reset_lora=False):
         self.sim_env = simpy.Environment()
         self.steps = 0
-        for i in range(len(self.nodes)):
-            self.nodes[i].reset(self.sim_env)
-            self.nodes[i].last_payload_sent = self.environment.sense(self.nodes[i].location, 0)
+        for i, node in enumerate(self.nodes):
+            node.reset(self.sim_env)
+            node.last_payload_sent = self.environment.sense(node.index.row, node.index.col, self.sim_env.now * SIMPY_TO_GRASS_TIME_FACTOR)
+
             if reset_lora:
                 self.nodes[i].para = LoRaParameters(i % Gateway.NO_CHANNELS, sf=12)
         for i in range(len(self.gateways)):
@@ -195,12 +170,3 @@ class Simulation:
 
     def _check_adr_convergence(self, mean, difference):
         return np.max(mean) - np.min(mean) < difference
-
-    def field_reconstruction(self):
-        prediction = self.app.fusion_center.field_reconstruct(self.step_time * (self.steps))
-        return prediction
-
-
-    def eval_positive(self):
-        diff = np.fromiter(self.real_field.values(), dtype=float)- np.fromiter(self.constructed_field.values(), dtype=float)
-        return diff

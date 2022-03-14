@@ -1,3 +1,5 @@
+import os, sys, subprocess
+
 
 # IS7 = np.array([1,-8,-9,-9,-9,-9])
 # IS8 = np.array([-11,1,-11,-12,-13,-13])
@@ -17,12 +19,28 @@ DEBUG = 0
 DLtime = 1000 # msec
 MAX_RETRY = 20
 
-# MAX_DISTANCE = 1500 # 5 km
-MAX_DISTANCE = 2500
-GRID = 50 #m
-CORD = int(MAX_DISTANCE/GRID)
-
 MINUTE_TO_MS = 60000 # minute to ms
 UPDATA_RATE = 60 #update external environment every 1 second
 BATTERY_ENERGY = 22572000 # 3.3V 1900 mAh battery
-init_temp = 296.15
+
+UNIT_TIME_GRASS = 1 *  MINUTE_TO_MS # ms
+UNIT_TIME_SIMPY = 1 #ms
+GRASS_TO_SIMPY_TIME_FACTOR = UNIT_TIME_GRASS/UNIT_TIME_SIMPY
+SIMPY_TO_GRASS_TIME_FACTOR = 1/GRASS_TO_SIMPY_TIME_FACTOR
+
+
+gisdb = '~/grassdata'
+location = 'eae'
+mapset = 'grass'
+
+def env_init():
+    grass8bin = "/Applications/GRASS-7.8.app/Contents/Resources/bin/grass78"
+    gisbase = subprocess.check_output([grass8bin, "--config", "path"],
+                                      text=True).strip()  # directory where GRASS GIS lives
+    os.environ['GISBASE'] = gisbase
+    os.environ['LD_RUN_PATH'] = '/Applications/GRASS-7.8.app/Contents/Resources/lib'
+    sys.path.append(os.path.join(gisbase, "etc", "python"))
+
+
+
+

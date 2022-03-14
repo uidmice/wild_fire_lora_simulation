@@ -13,7 +13,7 @@ class Node:
     STATE_KEYS = []
 
     def __init__(self, node_id, energy_profile, lora_para: LoRaParameters,
-                 air_interface: AirInterface, sim_env, location, adr,
+                 air_interface: AirInterface, sim_env, location, index, adr,
                  adr_ack_limit=10, adr_ack_delay=5):
         self.id = node_id
         self.para = lora_para
@@ -25,6 +25,7 @@ class Node:
         self.packet_to_send = None
 
         self.location = location
+        self.index = index
         self.state = NodeStates.SLEEPING
 
         self._unique_packet_id = 0  # unique packets not counting for multiple tries
@@ -35,9 +36,8 @@ class Node:
         self.transmit_time = {}
         self.receive_time = {}
         self.sensed_history = {}
-        self.last_payload_sent = 0
+        self.last_payload_sent = None
         self.latest_sensed = 0
-        self.last_payload_change = 0
         self.last_packet_success = False
 
         if DEBUG:
@@ -91,11 +91,11 @@ class Node:
         self._unique_packet_id += 1
         return packet
 
-    def send(self, packet):
+    def send(self, packet, skip_lora=False):
         self.packet_to_send = packet
         self.num_packets_sent += 1
         self.state = NodeStates.SENDING_NO_COLLISION
-        yield self.sim_env.process(packet.schedule())
+        yield self.sim_env.process(packet.schedule(skip_lora=skip_lora))
 
         # not accounting energy cost to run on-device algorithm
         self.energy_profile.usage += self.energy_profile.transmit_energy_cost(packet.para.tp, packet.time_on_air)
@@ -104,11 +104,9 @@ class Node:
 
         if packet.received:
             self.unique_packet_received_successfully.append(packet.id)
-            self.last_payload_change = self.latest_sensed - self.last_payload_sent
             self.last_payload_sent = self.latest_sensed
             self.last_packet_success = True
         else:
-            self.last_payload_change = 0
             self.last_packet_success = False
         self.last_several_packets_received_or_not.append(self.last_packet_success)
         if self.adr or packet.adr:
@@ -172,14 +170,13 @@ class Node:
         self.transmit_time = {}
         self.receive_time = {}
         self.sensed_history = {}
-        self.last_payload_sent = 0
-        self.latest_sensed = 0
-        self.last_payload_change = 0
+        self.last_payload_sent = None
+        self.latest_sensed = None
         self.last_packet_success = False
 
 
     def sense(self, environment):
-        value = environment.sense(self.location, self.sim_env.now)
+        value = environment.sense(self.index.row, self.index.col, self.sim_env.now * SIMPY_TO_GRASS_TIME_FACTOR)
         self.sensed_history[self.sim_env.now] = value
         self.latest_sensed = value
         return value
@@ -252,19 +249,19 @@ class UplinkPacket():
     def change_tp_to(self, tp):
         self.para.change_tp_to(tp)
 
-    def schedule(self, t=0):
+    def schedule(self, t=0, skip_lora=False):
         assert t >= 0
         self.start_at = t + self.node.sim_env.now
         self.end_at = self.start_at + self.airtime()
         if t > 0:
             yield self.node.sim_env.timeout(t)
-        self.transmission = self.node.sim_env.process(self.send())
+        self.transmission = self.node.sim_env.process(self.send(skip_lora=skip_lora))
         yield self.transmission
 
-    def send(self):
+    def send(self, skip_lora=False):
         if DEBUG:
             print(str(self.node.sim_env.now) + ": " + str(self) + " is being sent\t TOA: " + str(self.time_on_air) + " ms")
-        self.node.air_interface.transmit(self)
+        self.node.air_interface.transmit(self, skip_lora)
         self.receive = self.node.sim_env.event()
         yield self.node.sim_env.timeout(self.time_on_air)
 
