@@ -48,12 +48,13 @@ class Environment:
     def propogate(self, source, init_time, lag, suffix=GROUND_TRUTH_SUFFIX, ros_out='gt_out', spread_out='gt_spread', spotting=False):
         calculate_ros(suffix, ros_out)
         calculate_spread(ros_out, suffix, source, spread_out, init_time=init_time, lag=lag, spotting=spotting)
-        return raster.raster2numpy(spread_out).astype(float), {'base': raster.raster2numpy(ros_out+'.base'), 'max': raster.raster2numpy(ros_out+'.max'), 'dir': raster.raster2numpy(ros_out+'.dir'), 'spotting': raster.raster2numpy(ros_out+'.spotting')}
+        pre = np.where(raster.raster2numpy(spread_out) + self.source> 0, 1, 0)
+        return pre, {'base': raster.raster2numpy(ros_out+'.base'), 'max': raster.raster2numpy(ros_out+'.max'), 'dir': raster.raster2numpy(ros_out+'.dir'), 'spotting': raster.raster2numpy(ros_out+'.spotting')}
 
     def generate_wildfire(self, lag, spotting=False):
         out_name = 'gt_spread'+'_'+str(lag)
         self.propogate(SOURCE_NAME, 0, lag, spread_out=out_name, spotting=spotting)
-        self.ground_truth=raster.raster2numpy(out_name).astype(float) + self.source
+        self.ground_truth = raster.raster2numpy(out_name).astype(float) + self.source
         self.simulation_time = lag
         return self.ground_truth
 

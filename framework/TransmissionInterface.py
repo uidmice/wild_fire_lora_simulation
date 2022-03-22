@@ -57,7 +57,7 @@ class AirInterface:
             rss = self.prop_model.tp_to_rss(False, p.para.tp, dist)
             snr = self.snr_model.rss_to_snr(rss)
             record = PacketRecord(p, gateway, rss, snr, dispatch[i])
-            self.sim_env.process(gateway.listen(record))
+            self.sim_env.process(gateway.listen(record, skip_lora=skip_lora))
 
     def reset(self, sim_env):
         self.sim_env = sim_env

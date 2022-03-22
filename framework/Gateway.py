@@ -27,8 +27,10 @@ class Gateway:
         if DEBUG:
             print('gateway %d' %id, "  @  (", self.location.x, ",", self.location.y,") on Channels ", str(self.channels))
 
-    def listen(self, re: PacketRecord):
-        if re.parameter.channel not in self.channels:
+    def listen(self, re: PacketRecord, skip_lora=False):
+        if skip_lora:
+            re.dispatch.succeed(value={self.id: re})
+        elif re.parameter.channel not in self.channels:
             re.status = PacketStatus.NOT_LISTEN   # Not listening to the channel
             re.dispatch.succeed(value={self.id: re})
         else:

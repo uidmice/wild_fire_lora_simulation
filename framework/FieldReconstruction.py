@@ -25,10 +25,10 @@ class FieldReconstructor:
         self.update_required = False
 
 
-    def field_reconstruct(self, lag, suffix='', spotting=False):
+    def field_reconstruct(self, source, init_time, lag, output, suffix='', spotting=False):
         if self.update_required:
             self.model_update(suffix)
-        pre, ros = self.env.propogate('source_3', 0, lag, suffix=PREDICTION_SUFFIX+suffix, ros_out='pre_out', spread_out='pre_spread', spotting=spotting)
+        pre, ros = self.env.propogate(source, init_time, lag, suffix=PREDICTION_SUFFIX+suffix, ros_out='pre_out', spread_out=output, spotting=spotting)
         return pre, ros
 
     def reset(self):

@@ -1,4 +1,6 @@
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+
 import numpy as np
 import random
 
@@ -7,6 +9,8 @@ env_init()
 
 from framework.utils import *
 from framework.Environment import Environment
+from framework.GRASS import SOURCE_NAME
+
 from Simulation import Simulation
 
 DEBUG = False
@@ -20,25 +24,112 @@ plt.imshow(true_p)
 
 n_sensors = 400
 
+np.random.seed(0)
 row_idx = np.random.choice(environment.rows, n_sensors)
 col_idx = np.random.choice(environment.cols, n_sensors)
 node_indexes = [Index(row_idx[i], col_idx[i]) for i in range(n_sensors)]
 gateway_indexes = [Index(environment.rows//2, environment.cols//2)]
 
-step_time = 6000  # ms
+# step_time = 6000  # ms
+step_time = GRASS_TO_SIMPY_TIME_FACTOR
 offset = 3000
 
 simulation = Simulation(node_indexes, gateway_indexes, step_time, environment, offset=offset)
 plt.scatter([n.index.col for n in simulation.nodes], [n.index.row for n in simulation.nodes])
 plt.show()
 
-num_steps = T * GRASS_TO_SIMPY_TIME_FACTOR / step_time
 
-for i in range(3):
-    send_index, received = simulation.step(random_policy(0.5, simulation))
+radius = 20
+
+on_fire = []
+pre = []
+
+simulation.reset()
+sent = []
+points = []
+step  = 10
+for i in range(0, T+1, step):
+    on_fire.append(environment.get_on_fire(i))
+    fire_zone = np.where(on_fire[-1]> 0)
+    fire_zone = set(zip(fire_zone[0], fire_zone[1]))
+    action = []
+
+
+    for j, node in enumerate(simulation.nodes):
+        neighbor = set([(node.index.row + a, node.index.col + b) for a in range(-radius, radius + 1) for b in range(-radius, radius + 1)])
+        if neighbor.intersection(fire_zone) and j not in sent:
+            action.append(True)
+            sent.append(j)
+        else:
+            action.append(False)
+
+    if np.sum(action) < 2:
+        unsent = set(range(n_sensors)) - set(sent)
+        selected = np.random.choice(list(unsent), 2, False).astype(int)
+        for n in selected:
+            action[n] = True
+            sent.append(n)
+
+    send_index, received = simulation.step(action, True)
+    print(send_index)
+
+    points.append([simulation.nodes[i].index for i in send_index])
+
+    if i == 0:
+        predict, ros = simulation.app.fusion_center.field_reconstruct(SOURCE_NAME, 0, step, 'predict')
+    else:
+        predict, ros = simulation.app.fusion_center.field_reconstruct('predict', i, step, 'predict')
+
+    pre.append(predict)
+
+a = np.array(on_fire)
+b = np.array(pre)
+
+fig, ax = plt.subplots(1, 2, sharex=True, sharey=True)
+
+def animate(i):
+    fig.suptitle(f'$\Delta t={step}, T = {i * step}$', fontsize=16)
+    ax[0].clear()
+    ax[1].clear()
+    ax[0].imshow(a[i])
+    ax[1].imshow(b[i])
+    ax[1].scatter([index.col for index in points[i]], [index.row for index in points[i]])
+    e = np.sum(np.absolute(a[i] - b[i]))
+    ax[0].set_title('Propogation')
+    ax[1].set_title('Prediction, e=%d, $e/\sqrt{A}=$%.2f' % (e, e / np.sqrt(np.sum(a[i])+1)))
+    plt.tight_layout()
+
+writer = animation.writers['ffmpeg']
+writer = writer(fps=2, metadata=dict(artist='Me'), bitrate=900)
+ani = FuncAnimation(fig, animate, len(a), interval=1000)
+ani.save(f"results/spread_ani_step_{step}.mp4", writer=writer)
+
+sa = np.sum(a, axis=0)
+sb = np.sum(b, axis=0)
+fig, ax = plt.subplots(1, 2, sharex=True, sharey=True)
+fig.suptitle(f'$\Delta t={step}$', fontsize=16)
+ax[0].imshow(np.where(sa>0, sa+10, 0), cmap='hot')
+ax[1].imshow(np.where(sb>0, sb+10, 0), cmap='hot')
+ax[0].set_title('Propogation')
+ax[1].set_title('Prediction')
+plt.tight_layout()
+fig.savefig(f"results/spread_step_{step}.jpg", dpi=fig.dpi)
+
+e = np.array([np.sum(np.absolute(a[i] - b[i])) for i in range(len(a))])
+A = np.array([np.sum(an) for an in a])
+fig, ax = plt.subplots(1,3, sharex=True)
+ax[0].plot(e)
+ax[0].set_title('Error')
+ax[1].plot(e/(A+1))
+ax[1].set_title('Error/Area')
+ax[2].plot(e/np.sqrt(A+1))
+ax[2].set_title('Error/sqrt(Area)')
+fig.savefig(f"results/err_step_{step}.jpg", dpi=fig.dpi)
 
 # fire_zone = np.where(true_p> 0)
 # fire_zone = set(zip(fire_zone[0], fire_zone[1]))
+# region_size = len(fire_zone)
+# true_fire = environment.get_on_fire(T)
 #
 # extra = set()
 # radius = 2
@@ -64,9 +155,9 @@ for i in range(3):
 # ratio = [0.2, 0.5, 0.8]
 #
 # max_k = int(min(len(sensor_in)/0.8, len(sensor_out)/0.8))
-
-
-
+#
+#
+#
 # repeat = 3
 #
 # K = [max_k//10, max_k//5, max_k//2, max_k]
@@ -89,12 +180,12 @@ for i in range(3):
 #             data['y'] = node.location.y
 #             info = PacketInformation(0, node.id, data, 20)
 #             simulation.app.fusion_center.update(info)
-#         pre, ros = simulation.app.fusion_center.field_reconstruct(T, f'_{n_sensors}')
-#
+#         pre, ros = simulation.app.fusion_center.field_reconstruct(SOURCE_NAME, 0, T, 'predict',  f'_{n_sensors}')
+#         pre_size = np.where(pre + environment.source  > 0, 1, 0)
 #         axs[n, i].imshow(pre)
 #         axs[n, i].scatter([n.index.col for n in random_select],
 #                           [n.index.row for n in random_select], color='yellow')
-#         axs[n, i].set_title(f'{k} sensors, {q}, error={np.sum(np.absolute(true_p - pre))/len(fire_zone):.2f}')
+#         axs[n, i].set_title(f'{k} sensors, {q}, error={np.sum(np.absolute(pre_size - true_fire))}')
 # plt.tight_layout()
 # plt.show()
 # plt.ion()
