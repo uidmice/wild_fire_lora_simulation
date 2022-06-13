@@ -11,7 +11,8 @@ from framework.utils import *
 from framework.Environment import Environment
 from framework.GRASS import SOURCE_NAME
 
-from Simulation import Simulation
+from Region import Region
+
 
 DEBUG = False
 
@@ -28,14 +29,10 @@ np.random.seed(0)
 row_idx = np.random.choice(environment.rows, n_sensors)
 col_idx = np.random.choice(environment.cols, n_sensors)
 node_indexes = [Index(row_idx[i], col_idx[i]) for i in range(n_sensors)]
-gateway_indexes = [Index(environment.rows//2, environment.cols//2)]
 
-# step_time = 6000  # ms
-step_time = GRASS_TO_SIMPY_TIME_FACTOR
-offset = 3000
 
-simulation = Simulation(node_indexes, gateway_indexes, step_time, environment, offset=offset)
-plt.scatter([n.index.col for n in simulation.nodes], [n.index.row for n in simulation.nodes])
+region = Region(node_indexes, environment)
+plt.scatter([n.index.col for n in region.nodes], [n.index.row for n in region.nodes])
 plt.show()
 
 
@@ -44,7 +41,6 @@ radius = 20
 on_fire = []
 pre = []
 
-simulation.reset()
 sent = []
 points = []
 step  = 10
