@@ -16,7 +16,7 @@ from Region import Region
 
 DEBUG = False
 
-T = 500
+T = 600
 bound = Bound(57992, 54747, -14955, -11471)
 source = (56978.3098189104,-12406.60548812005)
 environment = Environment(bound, 'fuel', 'samplefm100', 'evi', 'samplevs', 'sampleth', 'dem', source)
@@ -25,14 +25,16 @@ plt.imshow(true_p)
 
 n_sensors = 400
 
-np.random.seed(0)
+np.random.seed(3)
 row_idx = np.random.choice(environment.rows, n_sensors)
 col_idx = np.random.choice(environment.cols, n_sensors)
-node_indexes = [Index(row_idx[i], col_idx[i]) for i in range(n_sensors)]
+node_indexes = [[row_idx[i], col_idx[i]] for i in range(n_sensors)]
 
 
 region = Region(node_indexes, environment)
-plt.scatter([n.index.col for n in region.nodes], [n.index.row for n in region.nodes])
+plt.figure(figsize=(10,10))
+plt.imshow(region.sub_regions)
+plt.scatter(col_idx, row_idx, c='r', marker='D', s=10)
 plt.show()
 
 
@@ -41,42 +43,38 @@ radius = 20
 on_fire = []
 pre = []
 
-sent = []
 points = []
-step  = 10
-for i in range(0, T+1, step):
+step  = 15
+for i in range(0, T, step):
     on_fire.append(environment.get_on_fire(i))
     fire_zone = np.where(on_fire[-1]> 0)
     fire_zone = set(zip(fire_zone[0], fire_zone[1]))
+    print(f'On-fire area: {len(fire_zone)}')
+
+
     action = []
+    # action = np.random.choice([True, False], n_sensors, p=[0.05, 1-0.05])
 
-
-    for j, node in enumerate(simulation.nodes):
-        neighbor = set([(node.index.row + a, node.index.col + b) for a in range(-radius, radius + 1) for b in range(-radius, radius + 1)])
-        if neighbor.intersection(fire_zone) and j not in sent:
+    for j, p in enumerate(node_indexes):
+        neighbor = set([(p[0] + a, p[1] + b) for a in range(-radius, radius + 1) for b in range(-radius, radius + 1)])
+        if neighbor.intersection(fire_zone) and np.random.rand()<0.7:
             action.append(True)
-            sent.append(j)
+        elif np.random.rand()<0.3:
+            action.append(True)
         else:
             action.append(False)
 
-    if np.sum(action) < 2:
-        unsent = set(range(n_sensors)) - set(sent)
-        selected = np.random.choice(list(unsent), 2, False).astype(int)
-        for n in selected:
-            action[n] = True
-            sent.append(n)
 
-    send_index, received = simulation.step(action, True)
-    print(send_index)
-
-    points.append([simulation.nodes[i].index for i in send_index])
+    points.append([[col, row] for col, row, a in zip(col_idx, row_idx, action) if a])
 
     if i == 0:
-        predict, ros = simulation.app.fusion_center.field_reconstruct(SOURCE_NAME, 0, step, 'predict')
+        region.model_update(action, i , SOURCE_NAME)
+        predict, ros = region.predict(SOURCE_NAME, i, step, 'predict')
     else:
-        predict, ros = simulation.app.fusion_center.field_reconstruct('predict', i, step, 'predict')
-
+        region.model_update(action, i , 'predict')
+        predict, ros = region.predict('predict', i , step, 'predict')
     pre.append(predict)
+    print(f'Predict area: {(predict>0).sum()}')
 
 a = np.array(on_fire)
 b = np.array(pre)
@@ -89,7 +87,7 @@ def animate(i):
     ax[1].clear()
     ax[0].imshow(a[i])
     ax[1].imshow(b[i])
-    ax[1].scatter([index.col for index in points[i]], [index.row for index in points[i]])
+    ax[1].scatter([p[0] for p in points[i]], [p[1] for p in points[i]])
     e = np.sum(np.absolute(a[i] - b[i]))
     ax[0].set_title('Propogation')
     ax[1].set_title('Prediction, e=%d, $e/\sqrt{A}=$%.2f' % (e, e / np.sqrt(np.sum(a[i])+1)))
@@ -100,27 +98,27 @@ writer = writer(fps=2, metadata=dict(artist='Me'), bitrate=900)
 ani = FuncAnimation(fig, animate, len(a), interval=1000)
 ani.save(f"results/spread_ani_step_{step}.mp4", writer=writer)
 
-sa = np.sum(a, axis=0)
-sb = np.sum(b, axis=0)
-fig, ax = plt.subplots(1, 2, sharex=True, sharey=True)
-fig.suptitle(f'$\Delta t={step}$', fontsize=16)
-ax[0].imshow(np.where(sa>0, sa+10, 0), cmap='hot')
-ax[1].imshow(np.where(sb>0, sb+10, 0), cmap='hot')
-ax[0].set_title('Propogation')
-ax[1].set_title('Prediction')
-plt.tight_layout()
-fig.savefig(f"results/spread_step_{step}.jpg", dpi=fig.dpi)
-
-e = np.array([np.sum(np.absolute(a[i] - b[i])) for i in range(len(a))])
-A = np.array([np.sum(an) for an in a])
-fig, ax = plt.subplots(1,3, sharex=True)
-ax[0].plot(e)
-ax[0].set_title('Error')
-ax[1].plot(e/(A+1))
-ax[1].set_title('Error/Area')
-ax[2].plot(e/np.sqrt(A+1))
-ax[2].set_title('Error/sqrt(Area)')
-fig.savefig(f"results/err_step_{step}.jpg", dpi=fig.dpi)
+# sa = np.sum(a, axis=0)
+# sb = np.sum(b, axis=0)
+# fig, ax = plt.subplots(1, 2, sharex=True, sharey=True)
+# fig.suptitle(f'$\Delta t={step}$', fontsize=16)
+# ax[0].imshow(np.where(sa>0, sa+10, 0), cmap='hot')
+# ax[1].imshow(np.where(sb>0, sb+10, 0), cmap='hot')
+# ax[0].set_title('Propogation')
+# ax[1].set_title('Prediction')
+# plt.tight_layout()
+# fig.savefig(f"results/spread_step_{step}.jpg", dpi=fig.dpi)
+#
+# e = np.array([np.sum(np.absolute(a[i] - b[i])) for i in range(len(a))])
+# A = np.array([np.sum(an) for an in a])
+# fig, ax = plt.subplots(1,3, sharex=True)
+# ax[0].plot(e)
+# ax[0].set_title('Error')
+# ax[1].plot(e/(A+1))
+# ax[1].set_title('Error/Area')
+# ax[2].plot(e/np.sqrt(A+1))
+# ax[2].set_title('Error/sqrt(Area)')
+# fig.savefig(f"results/err_step_{step}.jpg", dpi=fig.dpi)
 
 # fire_zone = np.where(true_p> 0)
 # fire_zone = set(zip(fire_zone[0], fire_zone[1]))

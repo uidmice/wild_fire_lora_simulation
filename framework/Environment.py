@@ -41,6 +41,7 @@ class Environment:
 
         self.vs = raster.raster2numpy(WIND_SPEED+GROUND_TRUTH_SUFFIX)
         self.th = raster.raster2numpy(WIND_DIR+GROUND_TRUTH_SUFFIX)
+        #
 
         self.simulation_time = 0
 
@@ -66,6 +67,11 @@ class Environment:
 
     def sense(self, row, col, time):
         return {'vs': self.vs[row, col], 'th': self.th[row, col], 'fire': self.ground_truth[row, col] < time}
+
+    def sense_region(self, row, col, mask, time):
+        firing = np.where ((self.ground_truth <= time) & (self.ground_truth > 0), 1, 0)
+        masked_result = firing * mask
+        return {'vs': self.vs[row, col], 'th': self.th[row, col], 'fire_area': np.sum(masked_result)}
 
     def get_on_fire(self, time):
         flag = np.where(self.ground_truth > 0, self.ground_truth, np.Inf)
