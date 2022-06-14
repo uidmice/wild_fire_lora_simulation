@@ -48,8 +48,6 @@ class Region:
         rast = raster.RasterSegment(source_name)
         rast.open('rw', overwrite=True)
 
-        print((predict>0).sum())
-
         send_index = [idx for idx, send in enumerate(actions) if send]
         for i in send_index:
             sensed = self.env.sense_region(self.point_set[i][0], self.point_set[i][1], self.masks[i], time)
@@ -66,7 +64,6 @@ class Region:
                 n_correct = n - (self.area[i] - len(wrong_cells))
                 random_set = set(random.sample(wrong_cells, n_correct))
                 for c in random_set:
-                    print(rast[c[0], c[1]])
                     rast[c[0], c[1]] = time
 
 
@@ -78,7 +75,6 @@ class Region:
                 assert wrong_cells.issubset(whole_cells)
                 random_set = set(random.sample(wrong_cells,  len(wrong_cells)-n))
                 for c in random_set:
-                    print(rast[c[0], c[1]])
                     rast[c[0], c[1]] = 0
 
         rast.close()
