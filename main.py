@@ -32,7 +32,7 @@ row_idx = np.random.choice(environment.rows, n_sensors)
 col_idx = np.random.choice(environment.cols, n_sensors)
 node_indexes = [[row_idx[i], col_idx[i]] for i in range(n_sensors)]
 communication = LoRaCommunication(node_indexes, [[environment.rows//2, environment.cols//2]],
-                                  step_time, environment, 1, offset=offset)
+                                  step_time, environment, 1, no_channels=2, use_adr=True, offset=offset)
 communication.reset()
 
 region = Region(node_indexes, environment)

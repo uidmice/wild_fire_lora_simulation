@@ -14,7 +14,7 @@ from config import *
 
 
 class LoRaCommunication:
-    def __init__(self, node_indexes, gateway_indexes, step_time, environment, distance_scale, offset=2000):
+    def __init__(self, node_indexes, gateway_indexes, step_time, environment, distance_scale, no_channels=8, use_adr=True, offset=2000):
         self.nodes = []
         self.gateways = []
         assert step_time >= offset + 3000
@@ -22,6 +22,7 @@ class LoRaCommunication:
         self.offset = offset
         self.sim_env = simpy.Environment()
         self.channel_nodes = {}
+        Gateway.NO_CHANNELS = no_channels
         for channel in range(Gateway.NO_CHANNELS):
             self.channel_nodes[channel] = []
         self.environment=environment
@@ -34,7 +35,7 @@ class LoRaCommunication:
         lora_para = [LoRaParameters(i % Gateway.NO_CHANNELS, sf=random.choice(LoRaParameters.SPREADING_FACTORS)) for i in range(len(node_indexes))]
         for i, idx in enumerate(node_indexes):
             node = Node(i, EnergyProfile(0.1), lora_para[i],
-                                   self.air_interface, self.sim_env, Location(idx[0]*environment.grass_r.nsres * distance_scale, idx[1]*environment.grass_r.ewres * distance_scale), idx, True)
+                                   self.air_interface, self.sim_env, Location(idx[0]*environment.grass_r.nsres * distance_scale, idx[1]*environment.grass_r.ewres * distance_scale), idx, use_adr)
             self.channel_nodes[lora_para[i].channel].append(node)
             self.nodes.append(node)
         for i, idx in enumerate(gateway_indexes):
