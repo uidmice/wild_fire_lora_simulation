@@ -7,14 +7,14 @@ from framework.utils import Location
 from framework.Node import Node, EnergyProfile
 from framework.Gateway import Gateway
 from framework.TransmissionInterface import AirInterface
-from framework.Backend import Server, Application
+from framework.Backend import Server
 from framework.LoRaParameters import LoRaParameters
 from framework.Environment import *
 from config import *
 
 
-class Simulation:
-    def __init__(self, node_indexes, gateway_indexes, step_time, environment, offset=2000):
+class LoRaCommunication:
+    def __init__(self, node_indexes, gateway_indexes, step_time, environment, distance_scale, offset=2000):
         self.nodes = []
         self.gateways = []
         assert step_time >= offset + 3000
@@ -27,28 +27,19 @@ class Simulation:
         self.environment=environment
         self.steps = 0
 
-        self.app = Application(self.environment)
-        self.server = Server(self.gateways, self.sim_env, self.app)
+        self.server = Server(self.gateways, self.sim_env)
         self.air_interface = AirInterface(self.sim_env, self.gateways, self.server)
 
 
-        lora_para = [LoRaParameters(i % Gateway.NO_CHANNELS, sf=7 + i %4) for i in range(len(node_indexes))]
+        lora_para = [LoRaParameters(i % Gateway.NO_CHANNELS, sf=random.choice(LoRaParameters.SPREADING_FACTORS)) for i in range(len(node_indexes))]
         for i, idx in enumerate(node_indexes):
             node = Node(i, EnergyProfile(0.1), lora_para[i],
-                                   self.air_interface, self.sim_env, Location(environment.grass_r.north-idx.row*environment.grass_r.nsres, idx.col*environment.grass_r.ewres + environment.grass_r.west), idx, True)
+                                   self.air_interface, self.sim_env, Location(idx[0]*environment.grass_r.nsres * distance_scale, idx[1]*environment.grass_r.ewres * distance_scale), idx, True)
             self.channel_nodes[lora_para[i].channel].append(node)
-            node.last_payload_sent = self.environment.sense(idx.row, idx.col, self.sim_env.now * SIMPY_TO_GRASS_TIME_FACTOR)
             self.nodes.append(node)
         for i, idx in enumerate(gateway_indexes):
-            self.gateways.append(Gateway(i, Location(idx.row*environment.grass_r.nsres + environment.grass_r.south, idx.col*environment.grass_r.ewres + environment.grass_r.west), idx, self.sim_env))
+            self.gateways.append(Gateway(i, Location(idx[0]*environment.grass_r.nsres* distance_scale, idx[1]*environment.grass_r.ewres *distance_scale), idx, self.sim_env))
 
-        self.constructed_field = {}
-        self.real_field = {}
-        self.temp_field = None
-
-
-    def node_states(self, *args, **kwargs):
-        return list(a.get_status(*args, **kwargs) for a in self.nodes)
 
     def step(self, actions, skip_lora=False):
         assert len(self.nodes) == len(actions)
@@ -159,10 +150,8 @@ class Simulation:
         self.steps = 0
         for i, node in enumerate(self.nodes):
             node.reset(self.sim_env)
-            node.last_payload_sent = self.environment.sense(node.index.row, node.index.col, self.sim_env.now * SIMPY_TO_GRASS_TIME_FACTOR)
-
             if reset_lora:
-                self.nodes[i].para = LoRaParameters(i % Gateway.NO_CHANNELS, sf=12)
+                self.nodes[i].para = LoRaParameters(i % Gateway.NO_CHANNELS, sf=random.choice(LoRaParameters.SPREADING_FACTORS))
         for i in range(len(self.gateways)):
             self.gateways[i].reset(self.sim_env)
         self.server.reset(self.sim_env)

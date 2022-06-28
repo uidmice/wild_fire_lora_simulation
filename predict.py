@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import itertools
-from Simulation import Simulation
+from LoRaCommunication import LoRaCommunication
 from framework.utils import load_config, random_policy, field_construct_data, random_network_construct, play_field_video
 from config import *
 import pickle

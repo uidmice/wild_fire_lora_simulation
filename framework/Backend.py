@@ -20,11 +20,10 @@ class Application:
 
 
 class Server:
-    def __init__(self, gateways, sim_env, application, num_measurements = 5, adr_margin_db = 10, mode = 3):
+    def __init__(self, gateways, sim_env, num_measurements = 5, adr_margin_db = 10, mode = 3):
         self.gateways = gateways
         self.sim_env = sim_env
         self.history = []
-        self.application = application
         #ADR:   mode = 1: average, 2: max, 3: min
         self.packet_snr_history = dict() # node id : [snr]
         self.packet_num_received_from = dict() # node id : num_packets
@@ -57,8 +56,6 @@ class Server:
             self.packet_num_received_from[p.node.id] += 1
             dl = DownlinkPacket()
             p.received = True
-            if info.payload:
-                self.application.run(info)
             if not p.adr:
                 self.packet_snr_history[p.node.id].clear()
                 self.adr_for_node[p.node.id] = None
@@ -108,7 +105,6 @@ class Server:
     def reset(self, sim_env):
         self.sim_env = sim_env
         self.history = []
-        self.application.reset()
         self.packet_snr_history = dict()  # node id : [snr]
         self.packet_num_received_from = dict()  # node id : num_packets
         self.adr_for_node = dict()

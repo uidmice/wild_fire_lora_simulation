@@ -176,7 +176,7 @@ class Node:
 
 
     def sense(self, environment):
-        value = environment.sense(self.index.row, self.index.col, self.sim_env.now * SIMPY_TO_GRASS_TIME_FACTOR)
+        value = environment.sense(self.index[0], self.index[1], self.sim_env.now * SIMPY_TO_GRASS_TIME_FACTOR)
         self.sensed_history[self.sim_env.now] = value
         self.latest_sensed = value
         return value

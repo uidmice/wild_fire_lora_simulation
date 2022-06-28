@@ -10,7 +10,7 @@ env_init()
 from framework.utils import *
 from framework.Environment import Environment
 from framework.GRASS import SOURCE_NAME
-
+from framework.LoRaCommunication import LoRaCommunication
 from Region import Region
 
 
@@ -24,12 +24,16 @@ true_p = environment.generate_wildfire(T)
 plt.imshow(true_p)
 
 n_sensors = 400
+step_time = 6000
+offset = 2000
 
 np.random.seed(3)
 row_idx = np.random.choice(environment.rows, n_sensors)
 col_idx = np.random.choice(environment.cols, n_sensors)
 node_indexes = [[row_idx[i], col_idx[i]] for i in range(n_sensors)]
-
+communication = LoRaCommunication(node_indexes, [[environment.rows//2, environment.cols//2]],
+                                  step_time, environment, 1, offset=offset)
+communication.reset()
 
 region = Region(node_indexes, environment)
 plt.figure(figsize=(10,10))
@@ -44,6 +48,7 @@ on_fire = []
 pre = []
 
 points = []
+update_points = []
 step  = 15
 for i in range(0, T, step):
     on_fire.append(environment.get_on_fire(i))
@@ -52,26 +57,23 @@ for i in range(0, T, step):
     print(f'On-fire area: {len(fire_zone)}')
 
 
-    action = []
-    # action = np.random.choice([True, False], n_sensors, p=[0.05, 1-0.05])
+    action = np.random.choice([True, False], n_sensors, p=[0.1, 0.9]).tolist()
+    send_index, received = communication.step(action, False)
+    print(f' # of sent: {len(send_index)}')
+    print(f' # of received: {len(received)}')
+    update_nodes =[False for j in range(n_sensors)]
 
-    for j, p in enumerate(node_indexes):
-        neighbor = set([(p[0] + a, p[1] + b) for a in range(-radius, radius + 1) for b in range(-radius, radius + 1)])
-        if neighbor.intersection(fire_zone) and np.random.rand()<0.7:
-            action.append(True)
-        elif np.random.rand()<0.3:
-            action.append(True)
-        else:
-            action.append(False)
-
+    for j in received:
+        update_nodes[j] = True
 
     points.append([[col, row] for col, row, a in zip(col_idx, row_idx, action) if a])
+    update_points.append([[col, row] for col, row, a in zip(col_idx, row_idx, update_nodes) if a])
 
     if i == 0:
-        region.model_update(action, i , SOURCE_NAME)
+        region.model_update(update_nodes, i , SOURCE_NAME)
         predict, ros = region.predict(SOURCE_NAME, i, step, 'predict')
     else:
-        region.model_update(action, i , 'predict')
+        region.model_update(update_nodes, i , 'predict')
         predict, ros = region.predict('predict', i , step, 'predict')
     pre.append(predict)
     print(f'Predict area: {(predict>0).sum()}')
@@ -87,10 +89,12 @@ def animate(i):
     ax[1].clear()
     ax[0].imshow(a[i])
     ax[1].imshow(b[i])
-    ax[1].scatter([p[0] for p in points[i]], [p[1] for p in points[i]])
+    ax[1].scatter([p[0] for p in points[i]], [p[1] for p in points[i]], color='red')
+    ax[1].scatter([p[0] for p in update_points[i]], [p[1] for p in update_points[i]], color='green')
+
     e = np.sum(np.absolute(a[i] - b[i]))
     ax[0].set_title('Propogation')
-    ax[1].set_title('Prediction, e=%d, $e/\sqrt{A}=$%.2f' % (e, e / np.sqrt(np.sum(a[i])+1)))
+    ax[1].set_title('Prediction, e=%d' % (e))
     plt.tight_layout()
 
 writer = animation.writers['ffmpeg']
