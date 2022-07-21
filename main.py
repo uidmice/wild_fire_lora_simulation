@@ -19,7 +19,7 @@ DEBUG = False
 T = 600
 bound = Bound(57992, 54747, -14955, -11471)
 source = (56978.3098189104,-12406.60548812005)
-environment = Environment(bound, 'fuel', 'samplefm100', 'evi', 'samplevs', 'sampleth', 'dem', source)
+environment = Environment(bound, 'fuel', 'samplefm100', 'evi', 'samplevs', 'sampleth', 'dem', source, gisdb, location, mapset)
 true_p = environment.generate_wildfire(T)
 plt.imshow(true_p)
 
