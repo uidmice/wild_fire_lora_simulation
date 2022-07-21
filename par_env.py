@@ -89,7 +89,7 @@ class parallel_env(ParallelEnv):
         bound = Bound(57992, 54747, -14955, -11471)
         source = (56978.3098189104, -12406.60548812005)
         self.environment = Environment(bound, 'fuel', 'samplefm100', 'evi', 'samplevs',
-                                       'sampleth', 'dem', source, 10, gisdb, location, mapset)
+                                       'sampleth', 'dem', source, gisdb, location, mapset, 10)
         self.environment.print_region()
         true_p = self.environment.generate_wildfire(self.T)
         plt.imshow(true_p)
