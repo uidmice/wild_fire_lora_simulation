@@ -4,10 +4,10 @@ from .GRASS import *
 
 class Environment:
     def __init__(self, bound, fuel, samplefm, evi, samplevs, sampleth, dem, source,
-                 res=10,
-                 gisbd = '~/grassdata',
-                 location='eae',
-                 mapset='grass'):
+                 gisbd ,
+                 location,
+                 mapset,
+                 res=10):
 
         self.bound = bound
         self.fuel = fuel
@@ -20,6 +20,8 @@ class Environment:
         g.region(raster=fuel)
         g.region(s=bound.s, n=bound.n, w=bound.w, e=bound.e, res=self.res, save=REGION_SAVE_NAME, overwrite=True)
         self.print_region()
+
+        caldata(REGION_SAVE_NAME, GROUND_TRUTH_SUFFIX, self.res, dem=self.dem, samplefm100=samplefm,samplevs=samplevs, sampleth=sampleth, evi=evi)
 
         self.grass_r = Region()
         self.grass_r.get_current()
@@ -37,7 +39,6 @@ class Environment:
         self.source = raster.raster2numpy(SOURCE_NAME)
         self.source[self.source<0] = 0
 
-        caldata(REGION_SAVE_NAME, GROUND_TRUTH_SUFFIX, self.res, dem=self.dem, samplefm100=samplefm,samplevs=samplevs, sampleth=sampleth, evi=evi)
 
         self.vs = raster.raster2numpy(WIND_SPEED+GROUND_TRUTH_SUFFIX)
         self.th = raster.raster2numpy(WIND_DIR+GROUND_TRUTH_SUFFIX)
@@ -46,11 +47,19 @@ class Environment:
         self.simulation_time = 0
 
 
-    def propogate(self, source, init_time, lag, suffix=GROUND_TRUTH_SUFFIX, ros_out='gt_out', spread_out='gt_spread', spotting=False):
+    def propogate(self, source, init_time, lag, suffix=GROUND_TRUTH_SUFFIX, ros_out='gt_out', spread_out='gt_spread', spotting=False, middle_state=None):
         calculate_ros(suffix, ros_out)
         calculate_spread(ros_out, suffix, source, spread_out, init_time=init_time, lag=lag, spotting=spotting)
-        pre = np.where(raster.raster2numpy(spread_out) + self.source> 0, 1, 0)
+        c = raster.raster2numpy(spread_out)
+        if not middle_state:
+            pre = np.where(c+ self.source> 0, 1, 0)
+        else:
+            try:
+                pre = [np.where((c + self.source> 0) & (c<= a), 1, 0) for a in middle_state]
+            except:
+                raise ValueError(f"middle_state should be a list, but is {middle_state} instead")
         return pre, {'base': raster.raster2numpy(ros_out+'.base'), 'max': raster.raster2numpy(ros_out+'.max'), 'dir': raster.raster2numpy(ros_out+'.dir'), 'spotting': raster.raster2numpy(ros_out+'.spotting')}
+
 
     def generate_wildfire(self, lag, spotting=False):
         out_name = 'gt_spread'+'_'+str(lag)

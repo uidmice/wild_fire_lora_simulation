@@ -100,9 +100,9 @@ class Region:
 
 
 
-    def predict(self, source, init_time, lag, output, suffix='', spotting=False):
+    def predict(self, source, init_time, lag, output, suffix='', spotting=False, middle_state=None):
         pre, ros = self.env.propogate(source, init_time, lag, suffix=PREDICTION_SUFFIX + suffix, ros_out='pre_out',
-                                      spread_out=output, spotting=spotting)
+                                      spread_out=output, spotting=spotting, middle_state=middle_state)
 
         return pre, ros
 

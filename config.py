@@ -32,13 +32,14 @@ SIMPY_TO_GRASS_TIME_FACTOR = 1/GRASS_TO_SIMPY_TIME_FACTOR
 gisdb = '~/grassdata'
 location = 'eae'
 mapset = 'grass'
+grass8bin = "/Applications/GRASS-7.8.app/Contents/Resources/bin/grass78"
+ld_run_path = '/Applications/GRASS-7.8.app/Contents/Resources/lib'
 
 def env_init():
-    grass8bin = "/Applications/GRASS-7.8.app/Contents/Resources/bin/grass78"
     gisbase = subprocess.check_output([grass8bin, "--config", "path"],
                                       text=True).strip()  # directory where GRASS GIS lives
     os.environ['GISBASE'] = gisbase
-    os.environ['LD_RUN_PATH'] = '/Applications/GRASS-7.8.app/Contents/Resources/lib'
+    os.environ['LD_RUN_PATH'] = ld_run_path
     sys.path.append(os.path.join(gisbase, "etc", "python"))
 
 

@@ -71,10 +71,13 @@ for i in range(0, T, step):
 
     if i == 0:
         region.model_update(update_nodes, i , SOURCE_NAME)
-        predict, ros = region.predict(SOURCE_NAME, i, step, 'predict')
+        future_predict, _ = region.predict(SOURCE_NAME, i, step * 5, 'predict_future', middle_state=[i+step*(a+1) for a in range(4)])
+        predict, _ = region.predict(SOURCE_NAME, i, step, 'predict')
     else:
         region.model_update(update_nodes, i , 'predict')
+        future_predict, _ = region.predict('predict', i, step * 5, 'predict_future', middle_state=[i+step*(a+1) for a in range(4)])
         predict, ros = region.predict('predict', i , step, 'predict')
+
     pre.append(predict)
     print(f'Predict area: {(predict>0).sum()}')
 
