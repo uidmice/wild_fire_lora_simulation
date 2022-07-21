@@ -42,14 +42,13 @@ class Region:
     #     self.predict
 
 
-    def model_update(self, actions, time, source_name, suffix='', percent=0.5):
+    def model_update(self, received, time, source_name, suffix='', percent=0.5):
         predict = raster.raster2numpy(source_name).astype(float)
         predict_state = [np.sum(np.where((predict<= time) & (predict >0), 1, 0) * self.masks[i])>= self.area[i]*percent for i in range(self.n_points)]
         rast = raster.RasterSegment(source_name)
         rast.open('rw', overwrite=True)
 
-        send_index = [idx for idx, send in enumerate(actions) if send]
-        for i in send_index:
+        for i in received:
             sensed = self.env.sense_region(self.point_set[i][0], self.point_set[i][1], self.masks[i], time)
             self.data['vs'][i] = sensed['vs']
             self.data['th'][i] = sensed['th']
@@ -81,8 +80,6 @@ class Region:
         predict = raster.raster2numpy(source_name).astype(float)
         print((predict>0).sum())
 
-
-
         data_idx = np.where(self.data['vs'] > 0)[0]
         y = [self.point_loc[i][1] for i in data_idx]
         x = [self.point_loc[i][0] for i in data_idx]
@@ -105,6 +102,15 @@ class Region:
                                       spread_out=output, spotting=spotting, middle_state=middle_state)
 
         return pre, ros
+
+    def get_state(self, idx, time):
+        sensed = self.env.sense_region(self.point_set[idx][0], self.point_set[idx][1], self.masks[idx], time)
+        n = int(self.area[idx] * 0.5)
+        return  [sensed['vs'], sensed['th'], int(sensed['fire_area'] >= n)]
+
+
+
+
 
 
 

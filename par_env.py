@@ -1,3 +1,5 @@
+import math
+
 from config import *
 env_init()
 
@@ -7,7 +9,7 @@ from framework.GRASS import SOURCE_NAME
 from framework.Environment import Environment
 from framework.utils import *
 import functools
-from gym.spaces import Discrete
+from gym.spaces import Discrete, Box
 from pettingzoo import ParallelEnv
 
 #from pettingzoo.utils import parallel_to_aec
@@ -22,24 +24,9 @@ import random
 #env_init()
 
 
-ROCK = 0
-PAPER = 1
-SCISSORS = 2
-NONE = 3
-MOVES = ["ROCK", "PAPER", "SCISSORS", "None"]
-NUM_ITERS = 100
-REWARD_MAP = {
-    (ROCK, ROCK): (0, 0),
-    (ROCK, PAPER): (-1, 1),
-    (ROCK, SCISSORS): (1, -1),
-    (PAPER, ROCK): (1, -1),
-    (PAPER, PAPER): (0, 0),
-    (PAPER, SCISSORS): (-1, 1),
-    (SCISSORS, ROCK): (-1, 1),
-    (SCISSORS, PAPER): (1, -1),
-    (SCISSORS, SCISSORS): (0, 0),
-}
-
+OBSERVATIONS = {'vs': 1, 'th': 1, 'burning': 1}
+FEEDBACK_DIM = 0
+NONE = [0 for n in OBSERVATIONS for _ in range(OBSERVATIONS[n])]
 
 # def env():
 #     """
@@ -71,7 +58,7 @@ REWARD_MAP = {
 class parallel_env(ParallelEnv):
     metadata = {"render_modes": ["human"], "name": "rps_v2"}
 
-    def __init__(self):
+    def __init__(self, n_agent):
         """
         The init method takes in environment arguments and should define the following attributes:
         - possible_agents
@@ -80,11 +67,12 @@ class parallel_env(ParallelEnv):
 
         These attributes should not be changed after initialization.
         """
-        self.possible_agents = ["player_" + str(r) for r in range(2)]
+        self.possible_agents = ["sensor_" + str(r) for r in range(n_agent)]
         self.agent_name_mapping = dict(
             zip(self.possible_agents, list(range(len(self.possible_agents))))
         )
-        
+
+
         self.T = 600
         bound = Bound(57992, 54747, -14955, -11471)
         source = (56978.3098189104, -12406.60548812005)
@@ -94,7 +82,7 @@ class parallel_env(ParallelEnv):
         true_p = self.environment.generate_wildfire(self.T)
         plt.imshow(true_p)
 
-        self.n_sensors = 100
+        self.n_sensors = n_agent
         step_time = 6000
         offset = 2000
 
@@ -112,11 +100,9 @@ class parallel_env(ParallelEnv):
         plt.imshow(self.region.sub_regions)
         plt.scatter(self.col_idx, self.row_idx, c='r', marker='D', s=10)
         plt.show()
-        self.grid_input_features = ["temp", "wind"]
-        self.agents_name = [str(i) for i in range(self.n_sensors)]
         self.I = 0
-        self.step = 15
-        self.observation_space = 2
+        self.step_size = 15
+        self.observation_dim = sum(OBSERVATIONS.values())
         self.action_space = 2
         #self.parallel_env = to_parallel(self.environment)
     # this cache ensures that same space object is returned for the same agent
@@ -124,7 +110,7 @@ class parallel_env(ParallelEnv):
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
         # Gym spaces are defined and documented here: https://gym.openai.com/docs/#spaces
-        return Discrete(2)
+        return Box(low=0, high=math.inf, shape=(self.observation_dim,))
 
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent):
@@ -135,14 +121,8 @@ class parallel_env(ParallelEnv):
         Renders the environment. In human mode, it can print to terminal, open
         up a graphical window, or open up some other display that a human can see and understand.
         """
-        if len(self.agents) == 2:
-            string = "Current state: Agent1: {} , Agent2: {}".format(
-                MOVES[self.state[self.agents[0]]
-                      ], MOVES[self.state[self.agents[1]]]
-            )
-        else:
-            string = "Game over"
-        print(string)
+        pass
+
 
     def close(self):
         """
@@ -170,11 +150,10 @@ class parallel_env(ParallelEnv):
     
     def get_env_info(self) -> dict:
         map_info = {
-            'grid_input_shape': [0, len(self.grid_input_features), self.environment.rows, self.environment.cols],
             'n_agents': self.n_sensors,
-            'agents_name': self.agents_name,
-            'obs_space': self.observation_space,
-            'state_space': self.n_sensors*self.observation_space
+            'agents_name': self.possible_agents,
+            'obs_space': self.observation_dim,
+            'state_space': self.n_sensors*self.observation_dim
         }
         map_info['n_actions'] = 2
         map_info['action_dim'] = 1
@@ -182,7 +161,8 @@ class parallel_env(ParallelEnv):
         return map_info
     
     def state(self):
-        return [i for i in range(self.n_sensors*self.observation_space)]
+        s = [self.region.get_state(i, self.I) for i in range(self.n_sensors)]
+        return [j for i in s for j in i]
     
     def step(self, actions):
         """
@@ -198,50 +178,36 @@ class parallel_env(ParallelEnv):
             self.agents = []
             return {}, {}, {}, {}
 
-        on_fire = self.environment.get_on_fire(self.I)
-        fire_zone = np.where(on_fire[-1] > 0)
-        fire_zone = set(zip(fire_zone[0], fire_zone[1]))
-        print(f'On-fire area: {len(fire_zone)}')
-        send_index, received = self.communication.step(actions, False)
+        send_index, received = self.communication.step(list(actions.values()), False)
 
-        n_send = len(send_index)
-        n_received = len(received)
+
         print(f' # of sent: {len(send_index)}')
         print(f' # of received: {len(received)}')
-        update_nodes = [False for j in range(self.n_sensors)]
 
-        for j in received:
-            update_nodes[j] = True
-
-        points = [[col, row]
-                  for col, row, a in zip(self.col_idx, self.row_idx, actions) if a]
-        update_points = [[col, row] for col, row,
-                         a in zip(self.col_idx, self.row_idx, update_nodes) if a]
 
         if self.I == 0:
-            update_nodes = True
-            self.region.model_update(update_nodes, self.I, SOURCE_NAME)
+            # received = [i for i in range(self.n_sensors)]
+            self.region.model_update(received, self.I, SOURCE_NAME)
             predict, ros = self.region.predict(
-                SOURCE_NAME, self.I, self.step, 'predict')
+                SOURCE_NAME, self.I, self.step_size, 'predict')
         else:
-            self.region.model_update(update_nodes, self.I, 'predict')
+            self.region.model_update(received, self.I, 'predict')
             predict, ros = self.region.predict(
-                'predict', self.I, self.step, 'predict')
+                'predict', self.I, self.step_size, 'predict')
 
         print(f'Predict area: {(predict>0).sum()}')
 
-        rewards = {abs(on_fire - predict) for j in range(self.n_sensors)}
-        self.I += 1
 
-        self.num_moves += 1
-        env_done = self.num_moves >= self.T
+        self.I +=  self.step_size
+
+        on_fire = self.environment.get_on_fire(self.I)
+        acc = 1 - np.sum(abs(on_fire- predict))/(self.region.cols * self.region.rows)
+        rewards = {agent: acc for agent in self.agents}
+        rewards = acc
+        env_done = self.I >= self.T
         dones = {agent: env_done for agent in self.agents}
 
-        # current observation is just the other player's most recent action
-        observations = {
-            self.agents[i]: int(actions[self.agents[1 - i]])
-            for i in range(len(self.agents))
-        }
+        observations = {self.agents[i]: self.region.get_state(i, self.I) for  i in range(self.n_sensors)}
 
         # typically there won't be any information in the infos, but there must
         # still be an entry for each agent
