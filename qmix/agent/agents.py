@@ -19,6 +19,10 @@ class MyAgents:
         self.env_info = env_info
         self.train_config = ConfigObjectFactory.get_train_config()
         self.env_config = ConfigObjectFactory.get_environment_config()
+        print(self.train_config.model_dir)
+        print(self.train_config.result_dir)
+        print(self.train_config.cuda)
+        print(self.env_config.learn_policy)
         self.n_agents = self.env_info['n_agents']
 
         if self.train_config.cuda:

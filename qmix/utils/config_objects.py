@@ -25,6 +25,6 @@ class TrainConfig:
         self.ppo_loss_clip = 0.2  # ppo的损失函数截取值
         self.target_update_cycle = 100
         self.save_epoch = 1000
-        self.model_dir = r"./models"
-        self.result_dir = r"./results"
+        self.model_dir = r"./qmix/models"
+        self.result_dir = r"./qmix/results"
         self.cuda = True
