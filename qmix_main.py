@@ -4,6 +4,7 @@ import os
 import matplotlib.pyplot as plt
 from absl import app
 
+from qmix.common.pettingzoo_environment import SimpleSpreadEnv
 from qmix.runner import RunnerSimpleEnv
 from qmix.utils.config_utils import ConfigObjectFactory
 
@@ -11,7 +12,8 @@ from par_env import parallel_env
 
 def main(args):
     print(args)
-    env = parallel_env()
+    env = parallel_env(4)
+    # env = SimpleSpreadEnv()
     try:
         runner = RunnerSimpleEnv(env)
         runner.run_marl()
