@@ -16,6 +16,7 @@ PREDICTION_SUFFIX = '_pre'
 REGION_SAVE_NAME='current_r'
 SOURCE_NAME = 'source'
 
+
 def grass_init(gisdb, location, mapset):
     cfile = gsetup.init(gisdb, location, mapset)
 

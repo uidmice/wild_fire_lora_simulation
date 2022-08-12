@@ -32,12 +32,10 @@ PRED_PENALTY = -5
 CORRECTION_REWARD = 0
 
 
-
 def agent_obs(binary=True):
     if binary:
         return MultiBinary(FUTURE_STEPS + 3)
     return Box(0.0, 1.0, shape=(FUTURE_STEPS + 3,))
-
 
 
 def env_obs(n_agents, binary=True):

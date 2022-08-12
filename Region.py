@@ -45,7 +45,6 @@ class Region:
         predict_state = [np.sum(np.where((predict<= time) & (predict >0), 1, 0) * self.masks[i])>= self.fire_threshold[i] for i in range(self.n_points)]
         rast = raster.RasterSegment(source_name)
         rast.open('rw', overwrite=True)
-
         corrected = []
 
         for i in received:
@@ -121,8 +120,6 @@ class Region:
         sensed = self.env.sense_region(self.point_set[idx][0], self.point_set[idx][1], self.masks[idx], time)
         n = int(self.area[idx] * 0.5)
         return  [sensed['vs'], sensed['th'], int(sensed['fire_area'] >= n)]
-
-
 
 
 

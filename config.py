@@ -34,6 +34,7 @@ location = 'newLocation'
 mapset = 'wf'
 grass8bin = "/usr/local/bin/grass"
 
+
 def env_init():
     gisbase = subprocess.check_output([grass8bin, "--config", "path"],
                                       text=True).strip()  # directory where GRASS GIS lives

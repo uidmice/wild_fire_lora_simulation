@@ -165,6 +165,7 @@ if __name__ == "__main__":
         )
         config = config.to_dict()
 
+
     elif args.run == "QMIX":
         max_seq_len = 64
         config = (
