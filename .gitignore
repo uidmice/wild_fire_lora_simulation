@@ -10,7 +10,7 @@ __pycache__/
 grass/
 qmix_main.py
 qmix/*
-
+config.py
 # Distribution / packaging
 .Python
 build/

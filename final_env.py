@@ -116,12 +116,13 @@ class g_env(MultiAgentEnv):
         self.step_size = 15
         self.eps = 0
         self.records = []
+        result_path = os.path.join(root, 'results')
         if args.suffix:
-            self.logging = os.path.join('/home/cloudmaster/eve/subregion/wild_fire_lora_simulation/results',
+            self.logging = os.path.join(result_path,
                                         '{}_{}_{}.txt'.format(
                                             datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.run, args.suffix))
         else:
-            self.logging = os.path.join('/home/cloudmaster/eve/subregion/wild_fire_lora_simulation/results','{}_{}.txt'.format(
+            self.logging = os.path.join(result_path,'{}_{}.txt'.format(
                 datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.run))
         json.dump(self.records, open(self.logging, 'w'))
 

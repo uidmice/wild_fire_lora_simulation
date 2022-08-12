@@ -90,7 +90,7 @@ parser.add_argument(
 if __name__ == "__main__":
     args = parser.parse_args()
     print('start')
-    ray.init(num_cpus=args.num_cpus or None, local_mode=args.local_mode)
+    ray.init(num_cpus=args.num_cpus or None, local_mode=args.local_mode, include_dashboard=False)
     print('ray start---------------------------------------------------')
     
     n_agents = args.n_agents

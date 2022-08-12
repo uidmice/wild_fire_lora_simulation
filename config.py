@@ -33,7 +33,7 @@ gisdb = '~/grassdata'
 location = 'newLocation'
 mapset = 'wf'
 grass8bin = "/usr/local/bin/grass"
-
+root = '/home/cloudmaster/eve/subregion/wild_fire_lora_simulation/'
 
 def env_init():
     gisbase = subprocess.check_output([grass8bin, "--config", "path"],

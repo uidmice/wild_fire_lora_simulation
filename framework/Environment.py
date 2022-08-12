@@ -1,8 +1,8 @@
 import numpy as np
-import logging
+import logging, os
 
 from .GRASS import *
-
+from config import root
 logger = logging.getLogger(__name__)
 
 class Environment:
@@ -32,7 +32,7 @@ class Environment:
         self.rows = self.grass_r.rows
 
         # row, col
-        dir_tmp = "/home/cloudmaster/eve/subregion/wild_fire_lora_simulation/data/source.txt"
+        dir_tmp = os.path.join(root, "data/source.txt")
         with open(dir_tmp, "w") as f:
             f.write('|'.join([str(a) for a in source]))
         script.run_command('v.in.ascii', input=dir_tmp, output=SOURCE_NAME, overwrite=True,
