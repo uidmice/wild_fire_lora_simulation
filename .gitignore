@@ -6,7 +6,10 @@ __pycache__/
 
 # C extensions
 *.so
+*.ipynb
 grass/
+qmix_main.py
+qmix/*
 # Distribution / packaging
 .Python
 build/

@@ -4,7 +4,7 @@ import random
 from framework.GRASS import *
 
 class Region:
-    def __init__(self, node_indices, env):
+    def __init__(self, node_indices, env, subregion_fire_percent=0.5):
         self.env = env
         self.cols = env.cols
         self.rows = env.rows
@@ -28,6 +28,9 @@ class Region:
         self.cell_set = [set([tuple(i) for i in l]) for l in self.cell_set ]
         self.area = [np.sum(ma) for ma in self.masks]
 
+        self.percent_fire = subregion_fire_percent
+        self.fire_threshold = [a * self.percent_fire for a in self.area]
+
         self.reset()
 
     def reset(self):
@@ -37,33 +40,31 @@ class Region:
         }
 
 
-    # def step(self, actions, time):
-    #     self.model_update(actions, time)
-    #     self.predict
-
-
-    def model_update(self, received, time, source_name, suffix='', percent=0.5):
+    def model_update(self, received, time, source_name, suffix=''):
         predict = raster.raster2numpy(source_name).astype(float)
-        predict_state = [np.sum(np.where((predict<= time) & (predict >0), 1, 0) * self.masks[i])>= self.area[i]*percent for i in range(self.n_points)]
+        predict_state = [np.sum(np.where((predict<= time) & (predict >0), 1, 0) * self.masks[i])>= self.fire_threshold[i] for i in range(self.n_points)]
         rast = raster.RasterSegment(source_name)
         rast.open('rw', overwrite=True)
+
+        corrected = []
 
         for i in received:
             sensed = self.env.sense_region(self.point_set[i][0], self.point_set[i][1], self.masks[i], time)
             self.data['vs'][i] = sensed['vs']
             self.data['th'][i] = sensed['th']
-            n = int(self.area[i]*percent)
+            n = int(self.fire_threshold[i])
             report_state = sensed['fire_area'] >= n
             if report_state and not predict_state[i]:
                 p = np.where((predict<= time) & (predict>0), 1, 0)
-                t = np.where((p==0) & (self.masks[i]==1))
+                t = np.where((p==0) & (sensed['firing']==1))
                 wrong_cells = set(zip(t[0], t[1]))
                 whole_cells = self.cell_set[i]
                 assert wrong_cells.issubset(whole_cells)
-                n_correct = n - (self.area[i] - len(wrong_cells))
-                random_set = set(random.sample(wrong_cells, n_correct))
-                for c in random_set:
+                # n_correct = n - (self.area[i] - len(wrong_cells))
+                # random_set = set(random.sample(wrong_cells, n_correct))
+                for c in wrong_cells:
                     rast[c[0], c[1]] = time
+                corrected.append(i)
 
 
             if not report_state and predict_state[i]:
@@ -75,10 +76,9 @@ class Region:
                 random_set = set(random.sample(wrong_cells,  len(wrong_cells)-n))
                 for c in random_set:
                     rast[c[0], c[1]] = 0
+                corrected.append(i)
 
         rast.close()
-        predict = raster.raster2numpy(source_name).astype(float)
-        print((predict>0).sum())
 
         data_idx = np.where(self.data['vs'] > 0)[0]
         y = [self.point_loc[i][1] for i in data_idx]
@@ -86,13 +86,14 @@ class Region:
         vs = self.data['vs'][data_idx]
         th = self.data['th'][data_idx]
 
-        with open("data/temp.txt", "w") as f:
+        with open("temp.txt", "w") as f:
             for c in zip(y, x, vs, th):
                 f.write('|'.join([str(a) for a in c]) + '\n')
 
-        script.run_command('v.in.ascii', input='data/temp.txt', output='sample', overwrite=True,
-                           columns='x double precision, y double precision, vsfpm double precision, mean double precision')
+        script.run_command('v.in.ascii', input='temp.txt', output='sample', overwrite=True,
+                           columns='x double precision, y double precision, vsfpm double precision, mean double precision', quiet=True)
         caldata(REGION_SAVE_NAME, PREDICTION_SUFFIX + suffix, self.env.res, samplevs='sample', sampleth='sample')
+        return corrected
 
 
 
@@ -100,8 +101,21 @@ class Region:
     def predict(self, source, init_time, lag, output, suffix='', spotting=False, middle_state=None):
         pre, ros = self.env.propogate(source, init_time, lag, suffix=PREDICTION_SUFFIX + suffix, ros_out='pre_out',
                                       spread_out=output, spotting=spotting, middle_state=middle_state)
+        if not middle_state:
+            b = np.array(self.subregion_firing(pre))
+        else:
+            b = np.array([self.subregion_firing(p) for p in pre])
 
-        return pre, ros
+        return pre, b
+
+    def subregion_firing(self, firing_state):
+        burning_a = []
+        for ma in self.masks:
+            masked = firing_state * ma
+            burning_a.append(np.sum(masked))
+        # burning_a = [np.sum(firing_state * ma) for ma in self.masks]
+        burning = [int(a > am) for a, am in zip(burning_a, self.fire_threshold)]
+        return burning
 
     def get_state(self, idx, time):
         sensed = self.env.sense_region(self.point_set[idx][0], self.point_set[idx][1], self.masks[idx], time)

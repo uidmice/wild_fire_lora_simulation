@@ -1,5 +1,4 @@
-import subprocess
-import os
+import os, sys
 
 # import grass gis package
 import grass.script as gs
@@ -22,6 +21,7 @@ def grass_init(gisdb, location, mapset):
 
     gs.message("Current GRASS GIS 8 environment:")
     print(gs.gisenv())
+    script.run_command('g.gisenv', set="DEBUG=0")
 
     return cfile
 
@@ -30,23 +30,23 @@ def caldata(regname, suffix, res, dem='dem', samplefm100='samplefm100',samplevs=
     try:
         g.region(region=regname, res=res)
 
-        script.run_command('r.slope.aspect', elevation=dem, slope='slope' + suffix, aspect='aspect' + suffix, overwrite=True)
-        script.run_command('v.surf.idw', input=samplefm100, output='moisture_100h' + suffix, column='mean', overwrite=True)
-        script.run_command('v.surf.idw', input=samplevs, output= WIND_SPEED+ suffix, column='vsfpm', overwrite=True)
-        script.run_command('v.surf.idw', input=sampleth, output= WIND_DIR+ suffix, column='mean', overwrite=True)
+        script.run_command('r.slope.aspect', elevation=dem, slope='slope' + suffix, aspect='aspect' + suffix, overwrite=True, quiet = True)
+        script.run_command('v.surf.idw', input=samplefm100, output='moisture_100h' + suffix, column='mean', overwrite=True, quiet = True)
+        script.run_command('v.surf.idw', input=samplevs, output= WIND_SPEED+ suffix, column='vsfpm', overwrite=True, quiet = True)
+        script.run_command('v.surf.idw', input=sampleth, output= WIND_DIR+ suffix, column='mean', overwrite=True, quiet = True)
         ss1 = 'moisture_1h'
         lfm = 'lfm'
 
         expm = ss1 + suffix + '=' + 'moisture_100h' + suffix + '-2'
-        r.mapcalc(expression=expm, overwrite=True)
+        r.mapcalc(expression=expm, overwrite=True, quiet = True)
 
         # estimating live fuel moisture from evi
         explfm = lfm + suffix + '=(417.602 * '+evi+') + 6.78061'
-        r.mapcalc(expression=explfm, overwrite=True)
+        r.mapcalc(expression=explfm, overwrite=True, quiet = True)
 
         # rescale LFM to 0-100
         output = lfm + suffix + '_scaled'
-        r.rescale(input='lfm' + suffix, output=output, to=(0, 100), overwrite=True)
+        r.rescale(input='lfm' + suffix, output=output, to=(0, 100), overwrite=True, quiet = True)
 
         return "successfully calculated"
 
@@ -62,7 +62,7 @@ def calculate_ros(suffix, output_name):
             direction=WIND_DIR+suffix, slope='slope'+suffix, aspect='aspect'+suffix,
             elevation='dem', base_ros=output_name+'.base',
             max_ros=output_name+'.max', direction_ros=output_name+'.dir',
-            spotting_distance=output_name+'.spotting', overwrite=True)
+            spotting_distance=output_name+'.spotting', overwrite=True, quiet = True)
         return 'ROS successfully calculated'
     except:
         print("Something went wrong")
@@ -78,12 +78,12 @@ def calculate_spread(input_name, suffix, source, output_name, init_time=0, lag=6
         script.run_command('r.spread', flags=f, base_ros=input_name+'.base', max_ros=input_name+'.max',
             direction_ros=input_name+'.dir', start=source,
             spotting_distance=input_name+'.spotting', wind_speed=WIND_SPEED+suffix,
-            fuel_moisture='moisture_1h'+suffix, output=output_name, init_time=init_time, lag=lag, overwrite=True)
+            fuel_moisture='moisture_1h'+suffix, output=output_name, init_time=init_time, lag=lag, overwrite=True, quiet = True)
     else:
         script.run_command('r.spread', flags=f, base_ros=input_name+'.base', max_ros=input_name+'.max',
             direction_ros=input_name+'.dir', start=source,
             spotting_distance=input_name+'.spotting', wind_speed=WIND_SPEED+suffix,
-            fuel_moisture='moisture_1h'+suffix, output=output_name,  lag=lag, overwrite=True)
+            fuel_moisture='moisture_1h'+suffix, output=output_name,  lag=lag, overwrite=True, quiet = True)
 
     # r.null(map=output_name, setnull=0)
     #

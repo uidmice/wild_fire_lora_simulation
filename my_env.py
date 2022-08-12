@@ -1,5 +1,4 @@
 import math
-
 from config import *
 env_init()
 
@@ -11,6 +10,7 @@ from framework.utils import *
 import functools
 from gym.spaces import Discrete, Box
 from pettingzoo import ParallelEnv
+from pettingzoo.utils import agent_selector
 
 #from pettingzoo.utils import parallel_to_aec
 
@@ -22,12 +22,12 @@ import random
 
 OBSERVATIONS = {'vs': 1, 'th': 1, 'burning': 1}
 FEEDBACK_DIM = 0
-NONE = [0 for n in OBSERVATIONS for _ in range(OBSERVATIONS[n])]
+NONE = 0
 
-class parallel_env(ParallelEnv):
+class g_env(ParallelEnv):
     metadata = {"render_modes": ["human"], "name": "rps_v2"}
 
-    def __init__(self, n_agent):
+    def __init__(self, n_agent=5):
         """
         The init method takes in environment arguments and should define the following attributes:
         - possible_agents
@@ -71,15 +71,17 @@ class parallel_env(ParallelEnv):
         plt.show()
         self.I = 0
         self.step_size = 15
-        self.observation_dim = sum(OBSERVATIONS.values())
-        self.action_space = 2
-        #self.parallel_env = to_parallel(self.environment)
+        self._action_spaces = {agent: Discrete(2) for agent in self.possible_agents}
+        self._observation_spaces = {
+            agent: Discrete(2) for agent in self.possible_agents
+        }
+
     # this cache ensures that same space object is returned for the same agent
     # allows action space seeding to work as expected
     @functools.lru_cache(maxsize=None)
     def observation_space(self, agent):
         # Gym spaces are defined and documented here: https://gym.openai.com/docs/#spaces
-        return Box(low=0, high=math.inf, shape=(self.observation_dim,))
+        return Discrete(2)
 
     @functools.lru_cache(maxsize=None)
     def action_space(self, agent):
@@ -113,26 +115,21 @@ class parallel_env(ParallelEnv):
         """
         self.agents = self.possible_agents[:]
         self.num_moves = 0
-        observations = {agent: NONE for agent in self.agents}
+        self.observations = {agent: NONE for agent in self.agents}
         self.I = 0
-        return observations
+        self._agent_selector = agent_selector(self.agents)
+        self.agent_selection = self._agent_selector.next()
+        return self.observations
     
-    def get_env_info(self) -> dict:
-        map_info = {
-            'n_agents': self.n_sensors,
-            'agents_name': self.possible_agents,
-            'obs_space': self.observation_dim,
-            'state_space': self.n_sensors*self.observation_dim
-        }
-        map_info['n_actions'] = 2
-        map_info['action_dim'] = 1
-        map_info['action_space'] = self.action_space
-        return map_info
-    
-    def state(self):
-        s = [self.region.get_state(i, self.I) for i in range(self.n_sensors)]
-        return [j for i in s for j in i]
-    
+    def observe(self, agent):
+        """
+        Observe should return the observation of the specified agent. This function
+        should return a sane observation (though not necessarily the most up to date possible)
+        at any time after reset() is called.
+        """
+        # observation of one agent is the previous state of the other
+        return self.observations[agent]
+
     def step(self, actions):
         """
         step(action) takes in an action for each agent and should return the
@@ -174,11 +171,11 @@ class parallel_env(ParallelEnv):
         acc = 1 - np.sum(abs(on_fire - predict))/(self.region.cols * self.region.rows)
         
         rewards = {agent: acc for agent in self.agents}
-        rewards = acc
+        # rewards = acc
         env_done = self.I >= self.T
         dones = {agent: env_done for agent in self.agents}
 
-        observations = {self.agents[i]: self.region.get_state(i, self.I) for  i in range(self.n_sensors)}
+        self.observations = {self.agents[i]: self.region.get_state(i, self.I)[-1] for i in range(self.n_sensors)}
 
         # typically there won't be any information in the infos, but there must
         # still be an entry for each agent
@@ -187,4 +184,4 @@ class parallel_env(ParallelEnv):
         if env_done:
             self.agents = []
 
-        return observations, rewards, env_done, infos
+        return self.observations, rewards, env_done, infos

@@ -1,6 +1,9 @@
 import numpy as np
+import logging
 
 from .GRASS import *
+
+logger = logging.getLogger(__name__)
 
 class Environment:
     def __init__(self, bound, fuel, samplefm, evi, samplevs, sampleth, dem, source,
@@ -19,7 +22,6 @@ class Environment:
 
         g.region(raster=fuel)
         g.region(s=bound.s, n=bound.n, w=bound.w, e=bound.e, res=self.res, save=REGION_SAVE_NAME, overwrite=True)
-        self.print_region()
 
         caldata(REGION_SAVE_NAME, GROUND_TRUTH_SUFFIX, self.res, dem=self.dem, samplefm100=samplefm,samplevs=samplevs, sampleth=sampleth, evi=evi)
 
@@ -30,12 +32,12 @@ class Environment:
         self.rows = self.grass_r.rows
 
         # row, col
-
-        with open("data/source.txt", "w") as f:
+        dir_tmp = "/home/cloudmaster/eve/subregion/wild_fire_lora_simulation/data/source.txt"
+        with open(dir_tmp, "w") as f:
             f.write('|'.join([str(a) for a in source]))
-        script.run_command('v.in.ascii', input='data/source.txt', output=SOURCE_NAME, overwrite=True,
-                           columns='x double precision, y double precision')
-        script.run_command('v.to.rast', input=SOURCE_NAME, output=SOURCE_NAME, type='point', use='cat', overwrite=True)
+        script.run_command('v.in.ascii', input=dir_tmp, output=SOURCE_NAME, overwrite=True,
+                           columns='x double precision, y double precision', quiet=True)
+        script.run_command('v.to.rast', input=SOURCE_NAME, output=SOURCE_NAME, type='point', use='cat', overwrite=True, quiet=True)
         self.source = raster.raster2numpy(SOURCE_NAME)
         self.source[self.source<0] = 0
 
@@ -80,7 +82,7 @@ class Environment:
     def sense_region(self, row, col, mask, time):
         firing = np.where ((self.ground_truth <= time) & (self.ground_truth > 0), 1, 0)
         masked_result = firing * mask
-        return {'vs': self.vs[row, col], 'th': self.th[row, col], 'fire_area': np.sum(masked_result)}
+        return {'vs': self.vs[row, col], 'th': self.th[row, col], 'fire_area': np.sum(masked_result), 'firing': masked_result}
 
     def get_on_fire(self, time):
         flag = np.where(self.ground_truth > 0, self.ground_truth, np.Inf)

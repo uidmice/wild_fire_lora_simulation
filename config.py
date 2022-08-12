@@ -45,7 +45,10 @@ def env_init():
     else:
         path = dir
     os.environ['LD_LIBRARY_PATH'] = path
+    os.environ['GRASS_VERBOSE'] = '-1'
     sys.path.append(os.path.join(gisbase, "etc", "python"))
+
+
 
 
 
