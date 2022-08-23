@@ -6,7 +6,7 @@ from config import root
 logger = logging.getLogger(__name__)
 
 class Environment:
-    def __init__(self, bound, fuel, samplefm, evi, samplevs, sampleth, dem, source,
+    def __init__(self, bound, fuel, samplefm, evi, samplevs, sampleth, dem,
                  gisbd ,
                  location,
                  mapset,
@@ -34,10 +34,11 @@ class Environment:
         # row, col
         dir_tmp = os.path.join(root, "data/source.txt")
         with open(dir_tmp, "w") as f:
-            f.write('|'.join([str(a) for a in source]))
+            f.write('|'.join([str(a) for a in (56978.3098189104, -12406.60548812005)]))
         script.run_command('v.in.ascii', input=dir_tmp, output=SOURCE_NAME, overwrite=True,
                            columns='x double precision, y double precision', quiet=True)
         script.run_command('v.to.rast', input=SOURCE_NAME, output=SOURCE_NAME, type='point', use='cat', overwrite=True, quiet=True)
+
         self.source = raster.raster2numpy(SOURCE_NAME)
         self.source[self.source<0] = 0
 
@@ -47,6 +48,18 @@ class Environment:
         #
 
         self.simulation_time = 0
+
+    def set_source(self, cells):
+        s = raster.RasterSegment(SOURCE_NAME)
+        s.open('rw', overwrite=True)
+        for i in range(self.rows):
+            for j in range(self.cols):
+                s[i, j] = 0
+        for c in cells:
+            s[c[0], c[1]] = 1
+        s.close()
+        self.source = raster.raster2numpy(SOURCE_NAME)
+        self.source[self.source < 0] = 0
 
 
     def propogate(self, source, init_time, lag, suffix=GROUND_TRUTH_SUFFIX, ros_out='gt_out', spread_out='gt_spread', spotting=False, middle_state=None):
