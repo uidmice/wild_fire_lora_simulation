@@ -9,9 +9,6 @@ from algorithms.baselines import Base_Agent, Random_Agent, Heuristic_Agent
 from train_env import g_env, test_env
 
 import os
-os.environ['KMP_DUPLICATE_LIB_OK']='True'
-
-device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
 
 def parse_args():
     parser = argparse.ArgumentParser("RL experiments Wildfires")
@@ -45,7 +42,7 @@ def parse_args():
     # parser.add_argument("--num-adversaries", type=int, default=1, help="number of adversaries")
 
     # core training parameters
-    parser.add_argument("--device", default='cpu', help="torch device ")
+    parser.add_argument("--device", choices=['cpu', 'cuda'], default='cpu', help="torch device ")
     parser.add_argument("--tao", type=int, default=0.01, help="how depth we exchange the par of the nn")
     parser.add_argument("--lr", type=float, default=0.001, help="learning rate for adam optimizer")
     parser.add_argument("--gamma", type=float, default=1, help="discount factor")
@@ -151,11 +148,15 @@ if __name__ == '__main__':
     # args.run= "GNNQmix"
     # args.fre4save_model = 3
 
-    env = g_env(args)
-    # env = test_env(args)
+    if args.device == 'cuda' and not torch.cuda.is_available():
+        print('CUDA is not available. Use CPU instead.')
+        args.device = 'cpu'
 
-    args.device = device
+    env = g_env(args)
     print(args)
+
+
+    args.device = torch.device(args.device)
 
     if args.run == 'BASE':
         agent = Base_Agent()
