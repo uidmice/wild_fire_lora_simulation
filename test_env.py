@@ -1,5 +1,7 @@
 import math
+import pickle, datetime, json
 from config import *
+
 env_init()
 
 from Region import Region
@@ -12,7 +14,7 @@ from gym.spaces import Discrete, Box
 from pettingzoo import ParallelEnv
 from pettingzoo.utils import agent_selector
 
-#from pettingzoo.utils import parallel_to_aec
+# from pettingzoo.utils import parallel_to_aec
 
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -20,72 +22,90 @@ from matplotlib.animation import FuncAnimation
 import numpy as np
 import random
 
-from gym.spaces import Dict, Discrete, MultiDiscrete, Tuple
-import numpy as np
+from gym.spaces import Dict, Discrete, MultiDiscrete, Tuple, MultiBinary
 
 from ray.rllib.env.multi_agent_env import MultiAgentEnv, ENV_STATE
 
+FUTURE_STEPS = 5
+NUM_CHANNELS = 2
 
-class g_env(MultiAgentEnv):
+COMM_PENALTY = -20
+PRED_PENALTY = -10
+CORRECTION_REWARD = 10
+FUTILE_COMM = -10
+
+WINDVS_LEVELS = 4
+WINDTH_LEVELS = 8
+
+AGENT_STATE = {
+    'PREDICTION': FUTURE_STEPS + 2,
+    'BURNING': 1,
+    'WIND': 2,
+    'LOCATION': 2,
+    'CHANNEL': NUM_CHANNELS,
+    'SF': 4
+}
+
+
+def agent_obs_t(state_composition):
+    return Box(0.0, np.inf, shape=(sum([AGENT_STATE[s] for s in state_composition]),))
+
+
+def env_obs_t(n_agents, state_composition):
+    return Box(0.0, np.inf, shape=(agent_obs_t(state_composition).shape[0] * n_agents,))
+    # return Tuple([agent_obs(binary, wind_in_state)]*n_agents)
+#
+# def agent_obs_one_hot(wind_in_state=False):
+#     if wind_in_state:
+#         return Box(np.array([0.0]*(FUTURE_STEPS * 2 + 6)), np.array([1.0]*(FUTURE_STEPS * 2 + 4)+[np.inf, np.inf]))
+#     return Box(0.0, 1.0, shape=(FUTURE_STEPS * 2 + 4,))
+#
+#
+# def env_obs_one_hot(n_agents, wind_in_state=False):
+#     return Box(0.0, np.inf, shape=(agent_obs_one_hot(wind_in_state).shape[0] * n_agents,))
+#     # return MultiBinary(agent_obs_one_hot(wind_in_state).shape[0] * n_agents)
+#     # return Tuple([agent_obs_one_hot(wind_in_state)]*n_agents)
+
+class g_env_t(MultiAgentEnv):
     action_space = Discrete(2)
-    def __init__(self, env_config):
+
+    def __init__(self, env_config, args):
         super().__init__()
-        self.action_space = Discrete(2)
+        self.action_space = g_env_t.action_space
         self.state = None
-        self.n_agents = env_config.get("n_agents", 5)
+        self.n_agents = env_config.get("n_agents", args.n_agents)
+        self.args = args
         self._skip_env_checking = True
-        # MADDPG emits action logits instead of actual discrete actions
+
         self.actions_are_logits = env_config.get("actions_are_logits", False)
-        self.one_hot_state_encoding = env_config.get("one_hot_state_encoding", False)
         self.with_state = env_config.get("separate_state_space", False)
+        self.state_composition = env_config.get('state_composition', AGENT_STATE.keys())
+        self.state_dim = agent_obs_t(self.state_composition).shape[0]
+        # self.binary = env_config.get("binary", True)
+        # if args.wind_in_state:
+        #     self.binary = False
         self._agent_ids = {i for i in range(self.n_agents)}
-        if not self.one_hot_state_encoding:
-            self.observation_space = MultiDiscrete([2 for i in range(self.n_agents)])
-            self.with_state = False
+
+        if self.with_state:
+            self.observation_space = Dict(
+                {
+                    'obs': agent_obs_t(self.state_composition),
+                    ENV_STATE: env_obs_t(self.n_agents, self.state_composition)
+                }
+            )
         else:
-            # Each agent gets the full state (one-hot encoding of which of the
-            # three states are active) as input with the receiving agent's
-            # ID (1 or 2) concatenated onto the end.
-            if self.with_state:
-                self.observation_space = Dict(
-                    {
-                        "obs": Discrete(2),
-                        ENV_STATE: MultiDiscrete([2 for i in range(self.n_agents)]),
-                    }
-                )
-            else:
-                self.observation_space = MultiDiscrete([2 for i in range(self.n_agents)])
-                
-        self.T = 600
+            self.observation_space = agent_obs_t(self.state_composition)
+
+        self.step_size = args.step_size
+        self.T = self.step_size * args.steps_per_episodes
+        self.spotting = args.spotting
         bound = Bound(57992, 54747, -14955, -11471)
-        source = (56978.3098189104, -12406.60548812005)
-        self.environment = Environment(bound, 'fuel', 'samplefm100', 'evi', 'samplevs',
-                                       'sampleth', 'dem', source, gisdb, location, mapset, 10)
-        self.environment.print_region()
-        true_p = self.environment.generate_wildfire(self.T)
-        plt.imshow(true_p)
 
-        self.n_sensors = self.n_agents
-        step_time = 6000
-        offset = 2000
 
-        np.random.seed(0)
-        self.row_idx = np.random.choice(self.environment.rows, self.n_sensors)
-        self.col_idx = np.random.choice(self.environment.cols, self.n_sensors)
-        node_indexes = [[self.row_idx[i], self.col_idx[i]]
-                        for i in range(self.n_sensors)]
-        self.communication = LoRaCommunication(node_indexes, [[self.environment.rows//2, self.environment.cols//2]],
-                                               step_time, self.environment, 1, no_channels=2, use_adr=True, offset=offset)
-        self.communication.reset()
 
-        self.region = Region(node_indexes, self.environment)
-        plt.figure(figsize=(10, 10))
-        plt.imshow(self.region.sub_regions)
-        plt.scatter(self.col_idx, self.row_idx, c='r', marker='D', s=10)
-        plt.show()
         self.I = 0
-        self.step_size = 15
         self.eps = 0
+        self.records = []
 
     def seed(self, seed=None):
         if seed:
@@ -95,39 +115,57 @@ class g_env(MultiAgentEnv):
         print('----------EPS {}----------'.format(self.eps))
         self.eps += 1
         self.I = 0
-        self.state = np.array([0 for i in range(self.n_agents)])
-        return self._obs()
+        self.state = np.zeros(env_obs_t(self.n_agents, self.state_composition).shape[0]).astype(int)
+        self.last_p = np.zeros(self.n_agents)
+        self.records = []
+        return self._obs([0 for _ in range(self.n_agents)])
 
-    def step(self, action_dict):
+    def take_action(self, action_dict):
         if self.actions_are_logits:
             action_dict = {
                 k: np.random.choice([0, 1], p=v) for k, v in action_dict.items()
             }
-        print('----------EPS {}, ROUND {}----------'.format(self.eps,self.I))
-        send_index, received = self.communication.step(list(action_dict.values()), False)
-        print(f' # of sent: {len(send_index)}')
-        print(f' # of received: {len(received)}')
+        print('----------EPS {}, ROUND {}----------'.format(self.eps, self.I))
 
-        rewards = {i: len(send_index) for i in range(self.n_agents)}
-        print('reward: {}'.format(len(send_index)))
-        # rewards = acc
-        done = self.I >= self.T
+        rewards = {i: np.random.choice(9) for i in range(self.n_agents)}
+        fb = [0 for i in range(self.n_agents)]
+
+        self.state = np.array([j for i in range(self.n_agents) for j in self.get_agent_obs(i, fb[i])])
+        # self.state = np.array([self.get_agent_obs(i, fb[i]) for i in range(self.n_agents)])
+        obs = self._obs(fb)
+
+
+        done = self.I > 240
+
         dones = {"__all__": done}
         infos = {}
-        
-        self.I +=  self.step_size
-        self.state = [self.region.get_state(i, self.I)[-1] for i in range(self.n_agents)]
-        obs = self._obs()
-        
+
+        self.I += self.step_size
+
+        return obs, rewards, dones, infos, fb
+
+
+    def step(self, action_dict):
+        obs, rewards, dones, infos, fb = self.take_action(action_dict)
         return obs, rewards, dones, infos
-       
-    def _obs(self):
+
+    def step_heuristic(self, action_dict):
+        obs, rewards, dones, infos, fb = self.take_action(action_dict)
+        return fb, dones["__all__"]
+
+    def _obs(self, predict_dt):
         if self.with_state:
             return {
-                i: self.obs_agent(i) for i in range(self.n_agents)
+                i: self.get_agent_obs_with_state(i, predict_dt[i]) for i in range(self.n_agents)
             }
         else:
-            return 
-    
-    def obs_agent(self, i):
-        return {"obs": self.region.get_state(i, self.I)[-1], ENV_STATE: self.state}
+            return {
+                i: self.get_agent_obs(i, predict_dt[i]) for i in range(self.n_agents)
+            }
+
+    def get_agent_obs(self, i, predict_bt):
+        return np.zeros(self.state_dim)
+
+
+    def get_agent_obs_with_state(self, i, predict_bt=0):
+        return {"obs": self.get_agent_obs(i, predict_bt), ENV_STATE: self.state}

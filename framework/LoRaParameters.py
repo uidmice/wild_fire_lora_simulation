@@ -1,6 +1,6 @@
 class LoRaParameters:
 
-    SPREADING_FACTORS = [ 10, 9, 8, 7]
+    SPREADING_FACTORS = { 10: 0, 9: 1, 8: 2, 7: 3}
     BAND_WIDTH = [125, 250, 500]
     CHANNELS = range(902300000, 915000000, 200000)
     TP_DBM = range(0, 22)
@@ -54,6 +54,9 @@ class LoRaParameters:
         assert (channel in range(64)), "Channel needs to be between [0, 63]"
         self.freq = LoRaParameters.CHANNELS[channel]
         self.channel = channel
+
+    def get_para_idx(self):
+        return self.channel, LoRaParameters.SPREADING_FACTORS[self.sf]
 
     def __str__(self):
         return 'SF{}BW{}TP{}'.format(int(self.sf), int(self.bw), int(self.tp))

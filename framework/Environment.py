@@ -15,7 +15,10 @@ class Environment:
         self.bound = bound
         self.fuel = fuel
         self.dem = dem
-
+        self.samplevs = samplevs
+        self.sampleth = sampleth
+        self.varying_wind = isinstance(self.sampleth, list) or isinstance(self.samplevs, list)
+        self.step_size = None
         self.res = res
 
         self.grass_proc = grass_init(gisbd, location, mapset)
@@ -23,7 +26,7 @@ class Environment:
         g.region(raster=fuel)
         g.region(s=bound.s, n=bound.n, w=bound.w, e=bound.e, res=self.res, save=REGION_SAVE_NAME, overwrite=True)
 
-        caldata(REGION_SAVE_NAME, GROUND_TRUTH_SUFFIX, self.res, dem=self.dem, samplefm100=samplefm,samplevs=samplevs, sampleth=sampleth, evi=evi)
+        self.vs, self.th = caldata(REGION_SAVE_NAME, GROUND_TRUTH_SUFFIX, self.res, dem=self.dem, samplefm100=samplefm,samplevs=samplevs, sampleth=sampleth, evi=evi)
 
         self.grass_r = Region()
         self.grass_r.get_current()
@@ -42,11 +45,6 @@ class Environment:
         self.source = raster.raster2numpy(SOURCE_NAME)
         self.source[self.source<0] = 0
 
-
-        self.vs = raster.raster2numpy(WIND_SPEED+GROUND_TRUTH_SUFFIX)
-        self.th = raster.raster2numpy(WIND_DIR+GROUND_TRUTH_SUFFIX)
-        #
-
         self.simulation_time = 0
 
     def set_source(self, cells):
@@ -62,9 +60,9 @@ class Environment:
         self.source[self.source < 0] = 0
 
 
-    def propogate(self, source, init_time, lag, suffix=GROUND_TRUTH_SUFFIX, ros_out='gt_out', spread_out='gt_spread', spotting=False, middle_state=None):
-        calculate_ros(suffix, ros_out)
-        calculate_spread(ros_out, suffix, source, spread_out, init_time=init_time, lag=lag, spotting=spotting)
+    def propogate(self, source, init_time, lag, suffix=GROUND_TRUTH_SUFFIX, ros_out='gt_out', spread_out='gt_spread', spotting=False, middle_state=None, sv_suffix=None, th_suffix=None):
+        calculate_ros(suffix, ros_out, sv_suffix=sv_suffix, th_suffix=th_suffix)
+        calculate_spread(ros_out, suffix, source, spread_out, init_time=init_time, lag=lag, spotting=spotting, sv_suffix=sv_suffix)
         c = raster.raster2numpy(spread_out)
         if not middle_state:
             pre = np.where(c+ self.source> 0, 1, 0)
@@ -83,6 +81,28 @@ class Environment:
         self.simulation_time = lag
         return self.ground_truth
 
+    def generate_wildfire_alternate(self, lag, step_size, spotting=False):
+        t = 0
+        i = 0
+        self.step_size = step_size
+        while t < lag:
+            nt = t + step_size
+            nt = min(nt, lag)
+            out_name = 'gt_spread'+'_'+str(nt)
+            vs = i%len(self.samplevs)
+            th = i%len(self.sampleth)
+            # print(f't={t}, nt={nt}, outname={out_name}')
+            if t == 0:
+                self.propogate(SOURCE_NAME, t, step_size, suffix=GROUND_TRUTH_SUFFIX, spread_out=out_name, spotting=spotting, sv_suffix=GROUND_TRUTH_SUFFIX + str(vs), th_suffix=GROUND_TRUTH_SUFFIX + str(th))
+            else:
+                self.propogate('gt_spread'+'_'+str(t), t, step_size, suffix=GROUND_TRUTH_SUFFIX, spread_out=out_name, spotting=spotting, sv_suffix=GROUND_TRUTH_SUFFIX + str(vs), th_suffix=GROUND_TRUTH_SUFFIX + str(th))
+            # print(np.max(raster.raster2numpy(out_name)))
+            t = nt
+            i += 1
+        self.ground_truth = raster.raster2numpy(out_name).astype(float) + self.source
+        self.simulation_time = lag
+        return self.ground_truth
+
     def print_region(self):
         print(g.region(flags='p'))
 
@@ -90,11 +110,17 @@ class Environment:
         os.remove(self.grass_proc)
 
     def sense(self, row, col, time):
+        if self.varying_wind:
+            return {'vs': self.vs[(time//self.step_size)%len(self.samplevs)][row, col], 'th': self.th[(time//self.step_size)%len(self.samplevs)][row, col], 'fire': self.ground_truth[row, col] < time}
         return {'vs': self.vs[row, col], 'th': self.th[row, col], 'fire': self.ground_truth[row, col] < time}
 
     def sense_region(self, row, col, mask, time):
         firing = np.where ((self.ground_truth <= time) & (self.ground_truth > 0), 1, 0)
         masked_result = firing * mask
+        if self.varying_wind:
+            r = {'vs': self.vs[(time//self.step_size)%len(self.samplevs)][row, col], 'th': self.th[(time//self.step_size)%len(self.sampleth)][row, col],
+                    'fire_area': np.sum(masked_result), 'firing': masked_result}
+            return r
         return {'vs': self.vs[row, col], 'th': self.th[row, col], 'fire_area': np.sum(masked_result), 'firing': masked_result}
 
     def get_on_fire(self, time):

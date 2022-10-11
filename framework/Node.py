@@ -185,6 +185,9 @@ class Node:
     def air_interface(self):
         return self._air_interface
 
+    def get_para_idx(self):
+        return self.para.get_para_idx()
+
 
 class EnergyProfile:
     rx_power_mA = [10.3, 11.1, 12.6]

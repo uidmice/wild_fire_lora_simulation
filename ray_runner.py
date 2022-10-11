@@ -17,17 +17,19 @@ from ray import tune
 # from ray.tune import register_env
 from gym.spaces import Discrete, Box, MultiDiscrete
 from ray.rllib.algorithms.qmix import QMixConfig
+
 from ray.rllib.algorithms.maddpg.maddpg import MADDPGConfig
 from ray.rllib.env.multi_agent_env import ENV_STATE
-from ray.rllib.examples.env.two_step_game import TwoStepGame
 from ray.rllib.policy.policy import PolicySpec
-from ray.rllib.utils.test_utils import check_learning_achieved
 from gym.spaces import Discrete, Box, Tuple, Dict
 import math
 
+from algorithms.gnn_qmix import GNNQmix, GNNQmixConfig
+
 from ray.tune.registry import register_env
 # import the pettingzoo environment
-from final_env import g_env, env_obs, agent_obs, env_obs_one_hot, agent_obs_one_hot
+from final_env import g_env, env_obs, agent_obs
+from test_env import g_env_t, env_obs_t, agent_obs_t
 import numpy as np
 
 
@@ -35,7 +37,10 @@ logger = logging.getLogger(__name__)
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    "--run", type=str, default="QMIX", help="The algorithm to use. Options: QMIX, MADDPG, RANDOM, HEURISTIC"
+    "--run",
+    choices=['QMIX', 'MADDPG', 'RANDOM', 'HEURISTIC', 'GNNQmix'],
+    default="QMIX",
+    help="The algorithm to use. Options: QMIX, MADDPG, RANDOM, HEURISTIC, GNNQmix"
 )
 
 parser.add_argument(
@@ -45,6 +50,8 @@ parser.add_argument(
 parser.add_argument(
     "--suffix", type=str
 )
+
+
 
 parser.add_argument(
     "--framework",
@@ -74,17 +81,18 @@ parser.add_argument(
     "--stop-iters", type=int, default=1, help="Number of iterations to train."
 )
 parser.add_argument(
-    "--steps-per-iters", type=int, default=2500, help="Number of timesteps to train."
+    "--steps-per-iters", type=int, default=2000, help="Number of timesteps to train."
 )
 
 parser.add_argument(
-    "--steps-per-episodes", type=int, default=50, help="Number of timesteps to train."
+    "--steps-per-episodes", type=int, default=25, help="Number of timesteps to train."
 )
 
 parser.add_argument(
-    "--step-size", type=int, default=30, help="Number of timesteps to train."
+    "--step-size", type=int, default=120, help="Number of steps in the fire simulation / training step. Determines the fire propagation rate."
 )
 
+parser.add_argument("--seed", type=int, default=123456)
 
 parser.add_argument(
     "--local-mode",
@@ -93,9 +101,10 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--one-hot-encoding",
-    action="store_true"
+    '--single-reward',
+    action='store_true'
 )
+
 
 parser.add_argument(
     "--spotting",
@@ -111,8 +120,21 @@ parser.add_argument(
 parser.add_argument(
     "--n-agents",
     type=int,
-    default=100
+    default=200
 )
+
+parser.add_argument(
+    '--enable-store',
+    dest='store',
+    action='store_true'
+)
+
+parser.add_argument(
+    "--alternating-wind",
+    type=int,
+    default=10
+)
+
 
 
 
@@ -134,6 +156,7 @@ if __name__ == "__main__":
         import datetime
 
         p = args.random_prob
+        args.run = 'RANDOM'
         env = g_env(dict(), args)
         for i in range(2):
             if i==1:
@@ -240,34 +263,38 @@ if __name__ == "__main__":
         print('ray start QMIX ---------------------------------------------------')
 
         grouping = {
-            "group_1": [i for i in range(n_agents)],
-        }
+                f"group_1": [i for i in range(n_agents)]
+            }
 
-        if args.one_hot_encoding:
-            obs_space = Tuple([Dict({"obs": agent_obs_one_hot(), ENV_STATE: env_obs_one_hot(n_agents)}) for i in range(n_agents)])
-        else:
-            obs_space = Tuple([Dict({"obs": agent_obs(), ENV_STATE: env_obs(n_agents)}) for i in range(n_agents)])
+        state_composition = ['PREDICTION', 'BURNING', 'WIND', 'LOCATION', 'CHANNEL', 'SF']
+
+
+        obs_space = Tuple([Dict({"obs": agent_obs(state_composition), ENV_STATE: env_obs(n_agents, state_composition)}) for i in range(n_agents)])
 
         act_space = Tuple([g_env.action_space for i in range(n_agents)])
 
         register_env(
             "grouped_g_env",
-            lambda config: g_env(config, args).with_agent_groups(
+            lambda config: g_env_t(config, args).with_agent_groups(
                 grouping, obs_space=obs_space, act_space=act_space
             )
         )
 
         max_seq_len = 64
+
         config = (
             QMixConfig()
             .training(
                 mixer=args.mixer,
-                train_batch_size=64, model={"max_seq_len": max_seq_len})
+                train_batch_size=64, model={"max_seq_len": max_seq_len},
+                target_network_update_freq=500
+            )
             .rollouts(num_rollout_workers=0, rollout_fragment_length=64)
             .exploration(
                 exploration_config={
+                    "initial_epsilon": 0.8,
                     "final_epsilon": 0.01,
-                    "epsilon_timesteps": 1000
+                    "epsilon_timesteps": 500
                 }
             )
             .environment(
@@ -275,13 +302,14 @@ if __name__ == "__main__":
                 env_config={
                     "n_agents": n_agents,
                     "separate_state_space": True,
-                    "one_hot_state_encoding": args.one_hot_encoding,
+                    'state_composition': state_composition
                 },
             )
             .resources(num_gpus=int(os.environ.get("RLLIB_NUM_GPUS", "0")))
         )
-        config = config.to_dict()
 
+        config = config.to_dict()
+        config["simple_optimizer"] = True
         config['min_sample_timesteps_per_iteration'] = args.steps_per_iters
 
         stop = {
@@ -293,37 +321,101 @@ if __name__ == "__main__":
 
         ray.shutdown()
 
+
+    elif args.run == "GNNQmix":
+        ray.init(num_cpus=args.num_cpus or None, local_mode=args.local_mode)
+        print('ray start GNNQmix ---------------------------------------------------')
+
+        grouping = {
+            f"group_1": [i for i in range(n_agents)]
+        }
+
+        state_composition = ['PREDICTION', 'BURNING', 'WIND', 'LOCATION', 'CHANNEL', 'SF']
+
+        obs_space = Tuple(
+            [Dict({"obs": agent_obs(state_composition), ENV_STATE: env_obs(n_agents, state_composition)}) for i in
+             range(n_agents)])
+
+        act_space = Tuple([g_env.action_space for i in range(n_agents)])
+
+        register_env(
+            "grouped_g_env",
+            lambda config: g_env(config, args).with_agent_groups(
+                grouping, obs_space=obs_space, act_space=act_space
+            )
+        )
+
+        max_seq_len = 64
+
+        config = (
+            GNNQmixConfig()
+            .training(
+                mixer=args.mixer,
+                train_batch_size=64,
+                model={"max_seq_len": max_seq_len},
+                target_network_update_freq=500
+            )
+            .rollouts(num_rollout_workers=0, rollout_fragment_length=64)
+            .exploration(
+                exploration_config={
+                    "initial_epsilon": 0.8,
+                    "final_epsilon": 0.01,
+                    "epsilon_timesteps": 500
+                }
+            )
+            .environment(
+                env="grouped_g_env",
+                env_config={
+                    "n_agents": n_agents,
+                    "separate_state_space": True,
+                    'state_composition': state_composition
+                },
+            )
+            .resources(num_gpus=int(os.environ.get("RLLIB_NUM_GPUS", "0")))
+        )
+
+        config = config.to_dict()
+        config["simple_optimizer"] = True
+        config['min_sample_timesteps_per_iteration'] = args.steps_per_iters
+
+        stop = {
+            "timesteps_total": 3000,
+            "training_iteration": args.stop_iters
+        }
+
+        results = tune.run(GNNQmix, stop=stop, config=config, verbose=2)
+
+        ray.shutdown()
+
     elif args.run == "RANDOM":
 
         p = args.random_prob
 
         env = g_env(dict(), args)
-        steps_per_episode = env.T // env.step_size + 1
+        iters = 0
 
-        for iter in range(args.stop_iters):
-            for ep in range(math.ceil(args.steps_per_iters/steps_per_episode)):
-                env.reset()
-                for i in range(steps_per_episode):
-                    action_dict = {i: np.random.choice([0,1], p=[1-p, p]) for i in range(n_agents)}
-                    obs, rewards, dones, infos = env.step(action_dict)
-                    if dones['__all__']:
-                        break
+        while iters < args.steps_per_iters:
+            env.reset()
+            while True:
+                action_dict = {i: np.random.choice([0,1], p=[1-p, p]) for i in range(n_agents)}
+                obs, rewards, dones, infos = env.step(action_dict)
+                iters += 1
+                if dones['__all__']:
+                    break
 
     elif args.run == 'HEURISTIC':
 
         env = g_env(dict(), args)
-        steps_per_episode = env.T // env.step_size + 1
-
-        for iter in range(args.stop_iters):
-            for ep in range(math.ceil(args.steps_per_iters/steps_per_episode)):
-                env.reset()
-                action = [0 for _ in range(n_agents)]
-                for i in range(steps_per_episode):
-                    fb, done = env.step_heuristic(action)
-                    print(fb)
-                    action = [int(a==2) for a in fb]
-                    if done:
-                        break
+        iters = 0
+        while iters < args.steps_per_iters:
+            env.reset()
+            action_dict = {i: 0 for i in range(n_agents)}
+            while True:
+                fb, done = env.step_heuristic(action_dict)
+                action_dict = {i: int(a==2) for i, a in enumerate(fb)}
+                iters += 1
+                if done:
+                    break
 
 
     else:

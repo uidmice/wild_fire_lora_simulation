@@ -32,7 +32,7 @@ class LoRaCommunication:
         self.air_interface = AirInterface(self.sim_env, self.gateways, self.server)
 
 
-        lora_para = [LoRaParameters(i % Gateway.NO_CHANNELS, sf=random.choice(LoRaParameters.SPREADING_FACTORS)) for i in range(len(node_indexes))]
+        lora_para = [LoRaParameters(i % Gateway.NO_CHANNELS, sf=random.choice(list(LoRaParameters.SPREADING_FACTORS.keys()))) for i in range(len(node_indexes))]
         for i, idx in enumerate(node_indexes):
             node = Node(i, EnergyProfile(0.1), lora_para[i],
                                    self.air_interface, self.sim_env, Location(idx[0]*environment.grass_r.nsres * distance_scale, idx[1]*environment.grass_r.ewres * distance_scale), idx, use_adr)
@@ -58,7 +58,8 @@ class LoRaCommunication:
 
     def _node_send_sensed_value(self, node_index, send, skip_lora):
         node = self.nodes[node_index]
-        data = node.sense(self.environment)
+        # data = node.sense(self.environment)
+        data = {}
         yield self.sim_env.timeout(np.random.randint(self.offset))
         if send:
             data['x'] = node.location.x
@@ -160,3 +161,7 @@ class LoRaCommunication:
 
     def _check_adr_convergence(self, mean, difference):
         return np.max(mean) - np.min(mean) < difference
+
+    def get_sensor_para(self, idx):
+        node = self.nodes[idx]
+        return node.get_para_idx()

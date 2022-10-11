@@ -26,6 +26,20 @@ def grass_init(gisdb, location, mapset):
 
     return cfile
 
+def uniformMap(regname, value, output_name, res):
+    g.region(region=regname, res=res)
+    cur_region = Region()
+    cur_region.get_current()
+
+    new = vector.Vector('vsuniform')
+    cols = [('cat',       'INTEGER PRIMARY KEY'),  ('value',      'double precision')]
+    new.open('w', tab_name='vsuniform', tab_cols=cols, overwrite=True)
+    p = Point((cur_region.east + cur_region.west)/2,(cur_region.south + cur_region.north)/2 )
+    new.write(p, cat=1, attrs=(value,))
+    new.table.conn.commit()
+    new.close()
+    script.run_command('v.surf.idw', input='vsuniform', output=output_name, column='value', overwrite=True,
+                       quiet=True)
 
 def caldata(regname, suffix, res, dem='dem', samplefm100='samplefm100',samplevs='samplevs', sampleth='sampleth', evi='evi'):
     try:
@@ -33,8 +47,31 @@ def caldata(regname, suffix, res, dem='dem', samplefm100='samplefm100',samplevs=
 
         script.run_command('r.slope.aspect', elevation=dem, slope='slope' + suffix, aspect='aspect' + suffix, overwrite=True, quiet = True)
         script.run_command('v.surf.idw', input=samplefm100, output='moisture_100h' + suffix, column='mean', overwrite=True, quiet = True)
-        script.run_command('v.surf.idw', input=samplevs, output= WIND_SPEED+ suffix, column='vsfpm', overwrite=True, quiet = True)
-        script.run_command('v.surf.idw', input=sampleth, output= WIND_DIR+ suffix, column='mean', overwrite=True, quiet = True)
+
+        if isinstance(samplevs, (int, float)):
+            uniformMap(regname, samplevs, WIND_SPEED+ suffix, res)
+            vs = raster.raster2numpy(WIND_SPEED + suffix)
+        elif isinstance(samplevs, list):
+            vs = []
+            for i in range(len(samplevs)):
+                uniformMap(regname, samplevs[i], WIND_SPEED + suffix + str(i), res)
+                vs.append(raster.raster2numpy(WIND_SPEED + suffix+ str(i)))
+        else:
+            script.run_command('v.surf.idw', input=samplevs, output= WIND_SPEED+ suffix, column='vsfpm', overwrite=True, quiet = True)
+            vs = raster.raster2numpy(WIND_SPEED + suffix)
+
+        if isinstance(sampleth, (int, float)):
+            uniformMap(regname, sampleth, WIND_DIR+ suffix, res)
+            th = raster.raster2numpy(WIND_DIR + suffix)
+        elif isinstance(sampleth, list):
+            th = []
+            for i in range(len(sampleth)):
+                uniformMap(regname, sampleth[i], WIND_DIR + suffix + str(i), res)
+                th.append(raster.raster2numpy(WIND_DIR + suffix+ str(i)))
+        else:
+            script.run_command('v.surf.idw', input=sampleth, output= WIND_DIR+ suffix, column='mean', overwrite=True, quiet = True)
+            th = raster.raster2numpy(WIND_DIR + suffix)
+
         ss1 = 'moisture_1h'
         lfm = 'lfm'
 
@@ -49,18 +86,23 @@ def caldata(regname, suffix, res, dem='dem', samplefm100='samplefm100',samplevs=
         output = lfm + suffix + '_scaled'
         r.rescale(input='lfm' + suffix, output=output, to=(0, 100), overwrite=True, quiet = True)
 
-        return "successfully calculated"
+        return vs, th
 
     except:
         print("Something went wrong")
 
 
-def calculate_ros(suffix, output_name):
+
+def calculate_ros(suffix, output_name, sv_suffix=None, th_suffix=None):
     # generate rate of spread raster map
+    if not sv_suffix:
+        sv_suffix = suffix
+    if not th_suffix:
+        th_suffix = suffix
     try:
         r.ros(model='fuel', moisture_1h='moisture_1h'+suffix,
-            moisture_live='lfm'+suffix+'_scaled', velocity=WIND_SPEED+suffix,
-            direction=WIND_DIR+suffix, slope='slope'+suffix, aspect='aspect'+suffix,
+            moisture_live='lfm'+suffix+'_scaled', velocity=WIND_SPEED+sv_suffix,
+            direction=WIND_DIR+th_suffix, slope='slope'+suffix, aspect='aspect'+suffix,
             elevation='dem', base_ros=output_name+'.base',
             max_ros=output_name+'.max', direction_ros=output_name+'.dir',
             spotting_distance=output_name+'.spotting', overwrite=True, quiet = True)
@@ -69,16 +111,19 @@ def calculate_ros(suffix, output_name):
         print("Something went wrong")
 
 
-def calculate_spread(input_name, suffix, source, output_name, init_time=0, lag=60, spotting=False):
+def calculate_spread(input_name, suffix, source, output_name, init_time=0, lag=60, spotting=False, sv_suffix=None):
     # generate rate of spread raster map
     f = ''
+    if not sv_suffix:
+        sv_suffix = suffix
+
     if spotting:
         f += 's'
     if init_time:
         f = 'i' + f
         script.run_command('r.spread', flags=f, base_ros=input_name+'.base', max_ros=input_name+'.max',
             direction_ros=input_name+'.dir', start=source,
-            spotting_distance=input_name+'.spotting', wind_speed=WIND_SPEED+suffix,
+            spotting_distance=input_name+'.spotting', wind_speed=WIND_SPEED+sv_suffix,
             fuel_moisture='moisture_1h'+suffix, output=output_name, init_time=init_time, lag=lag, overwrite=True, quiet = True)
     else:
         script.run_command('r.spread', flags=f, base_ros=input_name+'.base', max_ros=input_name+'.max',

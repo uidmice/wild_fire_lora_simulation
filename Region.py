@@ -72,7 +72,7 @@ class Region:
                 wrong_cells = set(zip(t[0], t[1]))
                 whole_cells = self.cell_set[i]
                 assert wrong_cells.issubset(whole_cells)
-                random_set = set(random.sample(wrong_cells,  len(wrong_cells)-n))
+                random_set = set(random.sample(list(wrong_cells),  len(wrong_cells)-n))
                 for c in random_set:
                     rast[c[0], c[1]] = 0
                 corrected.append(i)
@@ -91,8 +91,8 @@ class Region:
 
         script.run_command('v.in.ascii', input='temp.txt', output='sample', overwrite=True,
                            columns='x double precision, y double precision, vsfpm double precision, mean double precision', quiet=True)
-        caldata(REGION_SAVE_NAME, PREDICTION_SUFFIX + suffix, self.env.res, samplevs='sample', sampleth='sample')
-        return corrected
+        vs, th = caldata(REGION_SAVE_NAME, PREDICTION_SUFFIX + suffix, self.env.res, samplevs='sample', sampleth='sample')
+        return corrected, vs, th
 
 
 

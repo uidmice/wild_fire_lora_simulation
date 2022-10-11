@@ -12,22 +12,11 @@ from framework.LoRaCommunication import LoRaCommunication
 from framework.GRASS import SOURCE_NAME
 from framework.Environment import Environment
 from framework.utils import *
-import functools
-from gym.spaces import Discrete, Box
-from pettingzoo import ParallelEnv
-from pettingzoo.utils import agent_selector
-
-# from pettingzoo.utils import parallel_to_aec
-
-import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
 
 import numpy as np
 import random
 
-from gym.spaces import Dict, Discrete, MultiDiscrete, Tuple, MultiBinary
 
-from ray.rllib.env.multi_agent_env import MultiAgentEnv, ENV_STATE
 
 FUTURE_STEPS = 5
 NUM_CHANNELS = 2
@@ -50,78 +39,24 @@ AGENT_STATE = {
 }
 
 
-def agent_obs(state_composition):
-    return Box(0.0, np.inf, shape=(sum([AGENT_STATE[s] for s in state_composition]),))
-
-
-def env_obs(n_agents, state_composition):
-    return Box(0.0, np.inf, shape=(agent_obs(state_composition).shape[0] * n_agents,))
-    # return Tuple([agent_obs(binary, wind_in_state)]*n_agents)
-#
-# def agent_obs_one_hot(wind_in_state=False):
-#     if wind_in_state:
-#         return Box(np.array([0.0]*(FUTURE_STEPS * 2 + 6)), np.array([1.0]*(FUTURE_STEPS * 2 + 4)+[np.inf, np.inf]))
-#     return Box(0.0, 1.0, shape=(FUTURE_STEPS * 2 + 4,))
-#
-#
-# def env_obs_one_hot(n_agents, wind_in_state=False):
-#     return Box(0.0, np.inf, shape=(agent_obs_one_hot(wind_in_state).shape[0] * n_agents,))
-#     # return MultiBinary(agent_obs_one_hot(wind_in_state).shape[0] * n_agents)
-#     # return Tuple([agent_obs_one_hot(wind_in_state)]*n_agents)
-
-class g_env(MultiAgentEnv):
-    action_space = Discrete(2)
-
-    def __init__(self, env_config, args):
-        super().__init__()
-        self.action_space = g_env.action_space
-        self.state = None
-        self.n_agents = env_config.get("n_agents", args.n_agents)
+class g_env:
+    def __init__(self,  args):
         self.args = args
-        self._skip_env_checking = True
+        self.n_sensors = args.n_agents
 
-        self.actions_are_logits = env_config.get("actions_are_logits", False)
-        self.with_state = env_config.get("separate_state_space", False)
-        self.state_composition = env_config.get('state_composition', AGENT_STATE.keys())
-        self.state_dim = agent_obs(self.state_composition).shape[0]
-        # self.binary = env_config.get("binary", True)
-        # if args.wind_in_state:
-        #     self.binary = False
-        self._agent_ids = {i for i in range(self.n_agents)}
+        self.num_actions = 2
+        self.state_composition = {'DATA': ['PREDICTION', "BURNING", "WIND", "LOCATION"],
+                                  'COMM': ["CHANNEL", 'SF']}
+        self.obs_data_dim = sum([AGENT_STATE[feat] for feat in self.state_composition['DATA']])
+        self.obs_comm_dim = sum([AGENT_STATE[feat] for feat in self.state_composition['COMM']])
+        self.obs_dim = self.obs_data_dim + self.obs_comm_dim
+        self.state_dim = self.n_sensors * self.obs_dim
+        self.obs = None
+        self.state = None
 
-        if self.with_state:
-            self.observation_space = Dict(
-                {
-                    'obs': agent_obs(self.state_composition),
-                    ENV_STATE: env_obs(self.n_agents, self.state_composition)
-                }
-            )
-        else:
-            self.observation_space = agent_obs(self.state_composition)
 
-        # if self.one_hot_state_encoding:
-        #     if self.with_state:
-        #         self.observation_space = Dict(
-        #             {
-        #                 "obs": agent_obs_one_hot(self.args.wind_in_state),
-        #                 ENV_STATE: env_obs_one_hot(self.n_agents, self.args.wind_in_state),
-        #             }
-        #         )
-        #     else:
-        #         self.observation_space = agent_obs_one_hot()
-        # else:
-        #     if self.with_state:
-        #         self.observation_space = Dict(
-        #             {
-        #                 "obs": agent_obs(self.binary, args.wind_in_state),
-        #                 ENV_STATE: env_obs(self.n_agents, self.binary, args.wind_in_state),
-        #             }
-        #         )
-        #     else:
-        #         self.observation_space = agent_obs(self.binary, args.wind_in_state)
-
-        self.step_size = args.step_size
-        self.T = self.step_size * args.steps_per_episodes
+        self.step_size = args.wind_step_size
+        self.T = self.step_size * (args.per_episode_max_len+1)
         self.spotting = args.spotting
         bound = Bound(57992, 54747, -14955, -11471)
 
@@ -135,13 +70,13 @@ class g_env(MultiAgentEnv):
                                            'sampleth', 'dem', gisdb, location, mapset, 10)
             self.wind_vs = [self.environment.vs]
             self.wind_th = [self.environment.th]
+
         self.environment.print_region()
 
-        self.n_sensors = self.n_agents
         step_time = 6000
         offset = 2000
 
-        np.random.seed(args.seed)
+        self.seed(args.seed)
         self.row_idx = np.random.choice(self.environment.rows, self.n_sensors)
         self.col_idx = np.random.choice(self.environment.cols, self.n_sensors)
         node_indexes = [[self.row_idx[i], self.col_idx[i]]
@@ -160,11 +95,14 @@ class g_env(MultiAgentEnv):
         self.eps = 0
         self.records = []
         self.epi_data = {}
-        result_path = os.path.join(root, 'results')
+        result_path = args.save_dir
 
         SF = 'RS' if self.args.random_source else 'FS'
 
+
         dir_name = '{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.run, SF)
+        if  hasattr(args, 'mixer') and args.mixer != 'QMIX':
+            dir_name = dir_name + f'_{args.mixer}'
 
         if self.args.alternating_wind:
             dir_name = dir_name + f'_alter{args.alternating_wind}'
@@ -177,17 +115,16 @@ class g_env(MultiAgentEnv):
         self.logging = os.path.join(self.logdir, 'runs.txt')
         json.dump(self.records, open(self.logging, 'w'))
 
-    def seed(self, seed=None):
-        np.random.seed(seed)
-        random.seed(seed)
-        torch.manual_seed(seed)
+    def seed(self, s):
+        s = int(s)
+        np.random.seed(s)
+        torch.manual_seed(s)
+        random.seed(s)
 
     def reset(self):
         print('----------EPS {}----------'.format(self.eps))
         self.eps += 1
         self.I = 0
-        self.state = np.zeros(env_obs(self.n_agents, self.state_composition).shape[0]).astype(int)
-        self.last_p = np.zeros(self.n_agents)
         self.records = []
         if self.args.random_source or self.eps == 1:
             self.seed(self.seeds[self.eps])
@@ -206,20 +143,20 @@ class g_env(MultiAgentEnv):
                          'tfire': []
                          }
         self.dead_sensors = set()
-        return self._obs([0 for _ in range(self.n_agents)])
+        self._obs([0 for _ in range(self.n_sensors)])
+        self.last_p = np.zeros(self.n_sensors)
+        self.last_action = np.array([[1,0] for i in range(self.n_sensors)])
 
-    def take_action(self, action_dict):
-        if self.actions_are_logits:
-            action_dict = {
-                k: np.random.choice([0, 1], p=v) for k, v in action_dict.items()
-            }
+
+
+    def take_action(self, actions):
         for n in self.dead_sensors:
-            action_dict[n] = 0
+            assert not actions[n], "dead sensor should not act"
         print('----------EPS {}, ROUND {}----------'.format(self.eps, self.I))
-        send_index, received = self.communication.step(list(action_dict.values()), False)
+        send_index, received = self.communication.step(actions, False)
         if self.I == 0:
             if len(received) == 0:
-                received.append(np.random.randint(self.n_agents))
+                received.append(np.random.randint(self.n_sensors))
             corrected, vs, th = self.region.model_update(received, self.I, SOURCE_NAME)
             future_predict, future_b = self.region.predict(
                 SOURCE_NAME, self.I, self.step_size * FUTURE_STEPS, 'predict_future', spotting=self.spotting,
@@ -236,20 +173,24 @@ class g_env(MultiAgentEnv):
                 'predict', self.I, self.step_size, 'predict', spotting=self.spotting)
         # on_fire = self.environment.get_on_fire(self.I)
         # acc = 1 - np.sum(abs(on_fire - predict))/(self.region.cols*self.region.rows)
-        current_state = [self.region.get_state(i, self.I)[-1] for i in range(self.n_agents)]
-        on_fire = np.array(current_state)
-        for i in range(self.n_agents):
-            if on_fire[i] and np.random.random() < 0:
-                self.dead_sensors.add(i)
-        diff = np.absolute(on_fire - self.last_p)
-        acc = 1 - np.dot(diff, np.array(self.region.area)/np.sum(self.region.area))
 
-        rewards = {}
+        for i in range(self.n_sensors):
+            if self.burning[i] and np.random.random() < 0:
+                self.dead_sensors.add(i)
+        diff = np.absolute(self.burning - self.last_p)
+        acc = 1 - np.dot(diff, np.array(self.region.area)/np.sum(self.region.area))
+        rewards = np.ones(self.n_sensors)
+        print(f' # of sent: {len(send_index)}')
+        print(f' # of received: {len(received)}')
+        print(f'Predict area: {np.sum(self.last_p)}')
+        print(f'Burning area: {np.sum(self.burning)}')
+        print(f'accuracy: {acc} ')
+        print(f'dead sensors: {self.dead_sensors}')
         if self.args.single_reward:
-            avg = acc/max(len(send_index),1)
-            rewards = {i: avg for i in range(self.n_agents)}
+            rewards *= acc / max(len(send_index), 1)
+            print(f'reward: {np.average(rewards)}')
         else:
-            for i in range(self.n_agents):
+            for i in range(self.n_sensors):
                 if i in self.dead_sensors:
                     rewards[i] = 0
                 elif i in send_index:
@@ -263,39 +204,36 @@ class g_env(MultiAgentEnv):
                     rewards[i] = PRED_PENALTY
                 else:
                     rewards[i] = 0
-
-        print(f' # of sent: {len(send_index)}')
-        print(f' # of received: {len(received)}')
-        print(f'Predict area: {np.sum(self.last_p)}')
-        print(f'Burning area: {np.sum(on_fire)}')
-        print(f'accuracy: {acc}')
-        print('reward: {}'.format(np.average(list(rewards.values()))))
+            print(f'reward: {np.average(rewards)}, {rewards}')
 
 
         fb = (FUTURE_STEPS + 1 - np.sum(future_b, axis=0)).tolist()
-        self.state = np.array([j for i in range(self.n_agents) for j in self.get_agent_obs(i, fb[i])])
-        # self.state = np.array([self.get_agent_obs(i, fb[i]) for i in range(self.n_agents)])
 
-        obs = self._obs(fb)
+        done = (np.sum(self.burning) > 0.3 * self.n_sensors) and (self.I > 10*self.step_size)
+        if done:
+            dones = np.ones(self.n_sensors)
+        else:
+            dones = np.zeros(self.n_sensors)
+            for n in self.dead_sensors:
+                dones[n] = 1
 
         self.records.append({
             'sent': len(send_index),
             'received': len(received),
-            'rewards': sum(rewards.values()) / self.n_agents,
+            'rewards': np.average(rewards),
             'acc': acc,
             'sent_nodes': send_index,
             'received_nodes': received,
-            'reward_nodes': [float(r) for r in rewards.values()],
-            'burning_state': current_state
+            'reward_nodes': [float(r) for r in rewards],
+            'burning_state': self.burning.tolist()
         })
 
         if hasattr(self.args, 'store') and self.args.store:
             self.epi_data['pfire'].append(fb)
-            self.epi_data['tfire'].append(current_state)
+            self.epi_data['tfire'].append(self.burning)
             self.epi_data['pcwind_vs'].append(vs)
             self.epi_data['pcwind_th'].append(th)
 
-        done = ((self.I >= self.T) or (np.sum(on_fire) > 0.3 * self.n_agents)) and (self.I > 10*self.step_size)
         if done:
             predata = json.load(open(self.logging, 'r'))
             predata.append(self.records)
@@ -303,55 +241,134 @@ class g_env(MultiAgentEnv):
             if hasattr(self.args, 'store') and self.args.store:
                 pickle.dump(self.epi_data, open(os.path.join(self.logdir, f'data_{self.eps:02}.pk'), 'wb'))
 
-        dones = {"__all__": done}
-        infos = {}
-        if self.args.as_test:
-            infos = {'predict': predict, 'received': received, 'sent': send_index}
 
         self.I += self.step_size
         self.last_p = b
+        self.last_action = np.eye(self.num_actions)[actions]
 
-        return obs, rewards, dones, infos, fb
+        self._obs(fb)
+        return rewards, dones, done, fb
 
 
-    def step(self, action_dict):
-        obs, rewards, dones, infos, fb = self.take_action(action_dict)
-        return obs, rewards, dones, infos
+    def step(self, actions):
+        return self.take_action(actions)
 
-    def step_heuristic(self, action_dict):
-        obs, rewards, dones, infos, fb = self.take_action(action_dict)
-        return fb, dones["__all__"]
+
+    def get_state(self):
+        return self.state
+
+    def get_obs(self):
+        return self.obs
 
     def _obs(self, predict_dt):
-        if self.with_state:
-            return {
-                i: self.get_agent_obs_with_state(i, predict_dt[i]) for i in range(self.n_agents)
-            }
-        else:
-            return {
-                i: self.get_agent_obs(i, predict_dt[i]) for i in range(self.n_agents)
-            }
+        self.obs = np.concatenate((np.array([self.get_agent_obs_data(i, predict_dt[i]) for i in range(self.n_sensors)]), np.array([self.get_agent_obs_comm(i) for i in range(self.n_sensors)])), axis=1)
+        self.state = self.obs.flatten()
+        # self.burning = np.array([self.region.get_state(i, self.I)[-1] for i in range(self.n_sensors)])
+        self.burning = self.obs[:, FUTURE_STEPS + 2].copy()
+        for i in self.dead_sensors:
+            self.obs[i,:] = 0
+        return
 
-    def get_agent_obs(self, i, predict_bt):
-        if i in self.dead_sensors:
-            return np.zeros(self.state_dim)
+    def get_avail_actions(self):
+        actions = np.ones((self.n_sensors, self.num_actions))
+        for n in self.dead_sensors:
+            actions[n,1:] = 0
+        return actions
+
+
+    def get_agent_obs_data(self, i, predict_bt):
+
         s = self.region.get_state(i, self.I)
-        channel, sf = self.communication.get_sensor_para(i)
 
-        state = [0 for _ in range(FUTURE_STEPS + 2)] + \
-                [s[-1], s[0]/max([np.max(a) for a in self.wind_th]), s[1]/360]
+        state = [0 for _ in range(FUTURE_STEPS + 2)] + [s[-1]]
         state[predict_bt] = 1
 
-        if 'LOCATION' in self.state_composition:
+        if 'WIND' in self.state_composition['DATA']:
+            state += [s[0] / max([np.max(a) for a in self.wind_th]), s[1] / 360]
+
+        if 'LOCATION' in self.state_composition['DATA']:
             state += [self.row_idx[i]/self.environment.rows, self.col_idx[i]/self.environment.cols]
+        return state
 
-        if 'CHANNEL' in self.state_composition:
-            comm_state = [0 for _ in range(NUM_CHANNELS + 4)]
-            comm_state[sf] = 1
-            comm_state[4 + channel] = 1
-            state += comm_state
+    def get_agent_obs_comm(self, i):
+        channel, sf = self.communication.get_sensor_para(i)
+        comm_state = [0 for _ in range(NUM_CHANNELS + 4)]
+        comm_state[sf] = 1
+        comm_state[4 + channel] = 1
+        return comm_state
 
-        return np.array(state)
 
-    def get_agent_obs_with_state(self, i, predict_bt=0):
-        return {"obs": self.get_agent_obs(i, predict_bt), ENV_STATE: self.state}
+class test_env:
+    def __init__(self,  args):
+        self.args = args
+        self.n_sensors = args.n_agents
+
+        self.num_actions = 2
+        self.state_composition = {'DATA': ['PREDICTION', "BURNING", "WIND", "LOCATION"],
+                                  'COMM': ["CHANNEL", 'SF']}
+        self.obs_data_dim = sum([AGENT_STATE[feat] for feat in self.state_composition['DATA']])
+        self.obs_comm_dim = sum([AGENT_STATE[feat] for feat in self.state_composition['COMM']])
+        self.obs_dim = self.obs_data_dim + self.obs_comm_dim
+        self.state_dim = self.n_sensors * self.obs_dim
+        self.obs = None
+        self.state = None
+
+
+        self.seed(args.seed)
+
+        self.seeds = np.random.choice(100000, 1000)
+
+        self.dead_sensors = set()
+        self.logdir = 'test_log'
+
+        self.I = 0
+        self.eps = 0
+
+    def seed(self, seed):
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        random.seed(seed)
+
+    def reset(self):
+        self.eps += 1
+        self.I = 0
+        self.records = []
+
+        self.dead_sensors = set()
+        self._obs([0 for _ in range(self.n_sensors)])
+        self.last_action = np.array([[1, 0] for i in range(self.n_sensors)])
+
+    def take_action(self, actions):
+        for n in self.dead_sensors:
+            assert not actions[n], "dead sensor should not act"
+
+        rewards = np.random.random(self.n_sensors) * 10
+
+        fb = np.random.random_integers(0, 6, size=self.n_sensors).tolist()
+        done = self.I > 4
+        dones = np.ones(self.n_sensors) * int(done)
+
+        self.I += 1
+        self.last_action = np.eye(self.num_actions)[actions]
+
+        self._obs(fb)
+        return rewards, dones, done, fb
+
+    def step(self, actions):
+        return self.take_action(actions)
+
+    def get_state(self):
+        return self.state
+
+    def get_obs(self):
+        return self.obs
+
+    def _obs(self, predict_dt):
+        self.obs = np.random.random((self.n_sensors, self.obs_dim))
+        self.state = self.obs.flatten()
+        return
+
+    def get_avail_actions(self):
+        actions = np.ones((self.n_sensors, self.num_actions))
+        actions[0, 1] = 0
+        return actions
