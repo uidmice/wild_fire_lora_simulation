@@ -49,6 +49,7 @@ class ReplayBuffer(object):
         #     obs_and_last_action_t, state_t, u_t, new_avail_actions_t, \
         # obs_new_t, state_new_t, r_t, done_t = data_episode[:]
         data_encode_all = None
+        num_items = len(self._storage[0])
 
         # get the max episode len
         max_episode_len = 0
@@ -63,8 +64,8 @@ class ReplayBuffer(object):
             data_episode = self._storage[idx]
             num_diff_len = max_episode_len - data_episode[0].shape[0]
             num_diff_lens.append(num_diff_len)
-            data_episode = [np.vstack([data, np.zeros((num_diff_len,)+data[0].shape)])[np.newaxis, :] \
-                for data in data_episode]
+            data_episode = [np.vstack([data, np.ones((num_diff_len,)+data[0].shape) * (item_idx >= num_items - 2)])[np.newaxis, :] \
+                for item_idx,data in enumerate(data_episode)]
 
             if idx_id == 0:
                 data_encode_all = [data for data in data_episode]

@@ -13,7 +13,10 @@ import torch.nn as nn
 
 from replay_buffer import ReplayBuffer
 from .baselines import Base_Agent
-from .models import Q_Network, Qmixer, VDN, IQN, GNN, DummyGNN
+from .mixers import Qmixer, VDN, IQN
+from .graphmix import GraphMixer
+from .GNNs.gnn import DummyGNN
+from .q_network import Q_Network
 
 class QMIX_Agent(Base_Agent):
     def __init__(self, shape_obs, shape_state, num_agents, num_actions_set, args):
@@ -31,18 +34,18 @@ class QMIX_Agent(Base_Agent):
 
     def init_trainers(self):
         # self.mixing_net = Mixing_Network(max(self.num_actions_set), self.num_agents, args).to(args.device)
-        if self.args.run == 'GNNQmix':
-            self.shape_emb = self.args.gnn_out_dim
-            edges = list(itertools.product(range(self.num_agents), range(self.num_agents)))
-            u, v = torch.tensor([e[0] for e in edges]), torch.tensor([e[1] for e in edges])
-            g = dgl.graph((u, v)).to(self.args.device)
-            self.embedding_tar = GNN(self.shape_obs + max(self.num_actions_set), self.args.gnn_hidden_dim, self.shape_emb, g).to(self.args.device)
-            self.embedding_cur = GNN(self.shape_obs + max(self.num_actions_set), self.args.gnn_hidden_dim, self.shape_emb, g).to(self.args.device)
-
-        else:
-            self.shape_emb = self.shape_obs + max(self.num_actions_set)
-            self.embedding_tar = DummyGNN().to(self.args.device)
-            self.embedding_cur = DummyGNN().to(self.args.device)
+        # if self.args.run == 'GNNQmix':
+        #     self.shape_emb = self.args.gnn_out_dim
+        #     edges = list(itertools.product(range(self.num_agents), range(self.num_agents)))
+        #     u, v = torch.tensor([e[0] for e in edges]), torch.tensor([e[1] for e in edges])
+        #     g = dgl.add_self_loop(dgl.graph((u, v))).to(self.args.device)
+        #     self.embedding_tar = GNN(self.shape_obs + max(self.num_actions_set), self.args.gnn_hidden_dim, self.shape_emb, g).to(self.args.device)
+        #     self.embedding_cur = GNN(self.shape_obs + max(self.num_actions_set), self.args.gnn_hidden_dim, self.shape_emb, g).to(self.args.device)
+        #
+        # else:
+        self.shape_emb = self.shape_obs + max(self.num_actions_set)
+        self.embedding_tar = DummyGNN().to(self.args.device)
+        self.embedding_cur = DummyGNN().to(self.args.device)
 
         self.embedding_tar.load_state_dict(self.embedding_cur.state_dict())
         self.q_net_tar = Q_Network(self.shape_emb, max(self.num_actions_set), self.args).to(self.args.device)
@@ -55,6 +58,9 @@ class QMIX_Agent(Base_Agent):
         elif self.args.mixer == 'VDN':
             self.mixer_tar = VDN().to(self.args.device)
             self.mixer_cur = VDN().to(self.args.device)
+        elif self.args.mixer == 'GraphMix':
+            self.mixer_tar = GraphMixer(self.num_agents, self.shape_state, self.shape_obs, self.args)
+            self.mixer_cur = GraphMixer(self.num_agents, self.shape_state, self.shape_obs, self.args)
         if self.args.mixer == 'NONE':
             self.mixer_tar = IQN().to(self.args.device)
             self.mixer_cur = IQN().to(self.args.device)
@@ -69,7 +75,7 @@ class QMIX_Agent(Base_Agent):
         self.q_net_cur = torch.load(args.old_model_name+'q_net.pkl', map_location=args.device)
         self.mixer_cur =  torch.load(args.old_model_name+'hyper_net.pkl', map_location=args.device)
 
-    def select_actions(self, avail_actions, obs, actions_last, hidden_last, args, eval_flag=False, fb=None):
+    def select_actions(self, avail_actions, obs, actions_last, hidden_last, args, eval_flag=False, fb=None, burning=None):
         """
         Note:epsilon-greedy to choose the action
         """
@@ -110,8 +116,8 @@ class QMIX_Agent(Base_Agent):
         u_t_b = torch.from_numpy(u_n).to(args.device, dtype=torch.long)
         new_obs_and_u_t_b = torch.from_numpy(obs_new_n).to(args.device, dtype=torch.float)
         new_avail_act_t_b = (torch.from_numpy(new_avail_act_n)>0).to(args.device)
-        state_new_t_b = torch.from_numpy(state_new_n).to(args.device, dtype=torch.float) 
-        r_t_b = torch.from_numpy(r_n).to(args.device, dtype=torch.float) 
+        state_new_t_b = torch.from_numpy(state_new_n).to(args.device, dtype=torch.float)
+        r_t_b = torch.sum(torch.from_numpy(r_n).to(args.device, dtype=torch.float) , dim=-1) - 1
         done_t_b = torch.from_numpy(1-done_n).to(args.device, dtype=torch.float) # be careful for this action
         max_episode_len = state_new_n[0].shape[0]
 
@@ -123,6 +129,8 @@ class QMIX_Agent(Base_Agent):
         q_net_input_size = self.shape_obs + max(self.num_actions_set)
         hidden_cur = torch.zeros((args.batch_size*self.num_agents, args.q_net_hidden_size), device=args.device)
         hidden_tar = torch.zeros((args.batch_size*self.num_agents, args.q_net_hidden_size), device=args.device)
+        hidden_states_cur = []
+        hidden_states_tar = []
         for episode_step in range(max_episode_len):
             # obs_and_u_last_t_b --> [B, T, N, n_actions+obs_dim]
             # input --> [B, N, nkkk]
@@ -133,6 +141,8 @@ class QMIX_Agent(Base_Agent):
             input2 = self.embedding_tar(input2).reshape(-1,  self.shape_emb)
             q_values_cur, hidden_cur = self.q_net_cur(input1, hidden_cur)
             q_values_tar, hidden_tar = self.q_net_tar(input2, hidden_tar)
+            hidden_states_cur.append(hidden_cur)
+            hidden_states_tar.append(hidden_tar)
             if episode_step == 0:
                 q_cur = [q_values_cur.view(args.batch_size, self.num_agents, -1)]
                 q_tar = [q_values_tar.view(args.batch_size, self.num_agents, -1)]
@@ -140,24 +150,55 @@ class QMIX_Agent(Base_Agent):
                 q_cur.append(q_values_cur.view(args.batch_size, self.num_agents, -1))
                 q_tar.append(q_values_tar.view(args.batch_size, self.num_agents, -1))
 
-        q_cur = torch.stack(q_cur, dim=1)
-        q_cur = torch.gather(q_cur, -1, torch.transpose(u_t_b, -1, -2))
+        hidden_states_tar = torch.stack(hidden_states_tar, dim=1)
+        hidden_states_cur = torch.stack(hidden_states_cur, dim=1)
+        # B, T, N, hidden_dim
+
+        q_cur_per_action = torch.stack(q_cur, dim=1)
+        q_cur = torch.gather(q_cur_per_action, -1, torch.transpose(u_t_b, -1, -2))
         q_cur = torch.squeeze(q_cur).view(-1, 1, self.num_agents)
 
-        q_tar = torch.stack(q_tar, dim=1)
+        q_tar_per_action = torch.stack(q_tar, dim=1)
 
-        q_tar[~new_avail_act_t_b] = float('-inf')
+        q_tar_per_action[~new_avail_act_t_b] = float('-inf')
 
-        q_tar = torch.max(q_tar, dim=-1)[0].detach().view(-1, 1, self.num_agents)
+        if args.double_q:
+            q1 = q_cur_per_action.clone().detach()
+            q1[~new_avail_act_t_b] = float('-inf')
+            q1_tar = q1.max(dim=-1, keepdim=True)[1]
+            q_tar = torch.gather(q_tar_per_action, -1, q1_tar).view(-1, 1, self.num_agents)
+            # if torch.isinf(q_tar).any():
+            #     idx = torch.isinf(q_tar.view(args.batch_size, -1, self.num_agents)).nonzero(as_tuple=True)
+            #     print(f'Got inf number at {torch.isinf(q_tar.view(args.batch_size, -1, self.num_agents)).nonzero(as_tuple=False)}')
+            #     print(f'Corresponding action mask is {~new_avail_act_t_b[idx]}')
+            #     print(f'Corresponding numpy mask is {new_avail_act_n[idx]}')
+            #     raise ValueError
+
+        else:
+            q_tar = torch.max(q_tar_per_action, dim=-1)[0].detach().view(-1, 1, self.num_agents)
         # [B * T, 1, N]
 
 
         """step3 cal the qtot_cur and qtot_tar by hyper_network"""
-        qtot_cur = self.mixer_cur(q_cur, state_t_b.view(args.batch_size*max_episode_len, -1))
-        qtot_tar = self.mixer_tar(q_tar, state_new_t_b.view(args.batch_size*max_episode_len, -1) )
+        if self.args.mixer != 'GraphMix':
+            qtot_cur = self.mixer_cur(q_cur, state_t_b.view(args.batch_size*max_episode_len, -1))
+            qtot_tar = self.mixer_tar(q_tar, state_new_t_b.view(args.batch_size*max_episode_len, -1) )
+            local_td_error = None
+        else:
+            # [B * T, -1]
+            qtot_cur, local_rewards = self.mixer_cur(q_cur, state_t_b.view(args.batch_size*max_episode_len, -1),
+                                                  hidden_states=hidden_states_cur,
+                                                  team_rewards=r_t_b.view(args.batch_size*max_episode_len, -1),
+                                                  alive_agents=done_t_b.int())
+            qtot_tar = self.mixer_cur(q_tar, state_new_t_b.view(args.batch_size*max_episode_len, -1),
+                                                  hidden_states=hidden_states_tar,
+                                                  alive_agents=done_t_b.int())[0]
+            local_targets = local_rewards + args.gamma * done_t_b.view(args.batch_size*max_episode_len,-1) * q_tar.view(args.batch_size*max_episode_len,-1).detach()
+            local_td_error = (q_cur.view(args.batch_size*max_episode_len,-1).clone() - local_targets)
+
         qtot_tar = r_t_b.view(args.batch_size*max_episode_len, -1) + args.gamma * qtot_tar * done_t_b.view(args.batch_size*max_episode_len,-1)
 
-        return qtot_cur, qtot_tar, max_episode_len
+        return qtot_cur, qtot_tar, max_episode_len, local_td_error
         
     def learn(self, epi_cnt, args, logdir=None):
         print(epi_cnt)
@@ -176,7 +217,7 @@ class QMIX_Agent(Base_Agent):
         """ step1: get the batch data from the memory and change to tensor"""
         batch_data, num_diff_lens = self.memory.sample(args.batch_size) # obs_n obs_numpy
         # [B * T, 1], [B * T, N]
-        q, q_, T = self.cal_totq_values(batch_data, args)
+        q, q_, T, local_td_error= self.cal_totq_values(batch_data, args)
 
         """ step2: cal the loss by bellman equation """
         q = q.view(args.batch_size, T, -1)
@@ -197,8 +238,26 @@ class QMIX_Agent(Base_Agent):
 
         td_error = q_cur  - q_tar.detach()
         loss = (td_error ** 2).mean()
+
         if torch.isinf(loss) or torch.isnan(loss):
-            raise ValueError
+            raise ValueError('td_error is infinite')
+
+        if args.mixer == 'GraphMix':
+            local_td_error = local_td_error.view(args.batch_size, T, -1)
+            # delete the loss created by 0_padding data
+            for batch_cnt in range(args.batch_size):
+                if num_diff_lens[batch_cnt]:
+                    idx = -num_diff_lens[batch_cnt]
+                else:
+                    idx = T
+                local_error = local_td_error[batch_cnt][:idx] if batch_cnt == 0 else \
+                    torch.cat((local_error, local_td_error[batch_cnt][:idx]), dim=0)
+            local_loss = (local_error**2).mean()
+            loss += args.lambda_local * local_loss
+
+            if torch.isinf(loss) or torch.isnan(loss):
+                raise ValueError('GraphMIX: local_error is infinite')
+
         """ step3: loss backward """
         self.optimizer.zero_grad()
         loss.backward()

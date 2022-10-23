@@ -60,7 +60,8 @@ class Environment:
         self.source[self.source < 0] = 0
 
 
-    def propogate(self, source, init_time, lag, suffix=GROUND_TRUTH_SUFFIX, ros_out='gt_out', spread_out='gt_spread', spotting=False, middle_state=None, sv_suffix=None, th_suffix=None):
+    def propogate(self, source, init_time, lag, suffix=GROUND_TRUTH_SUFFIX, ros_out='gt_out', spread_out='gt_spread',
+                  spotting=False, middle_state=None, sv_suffix=None, th_suffix=None):
         calculate_ros(suffix, ros_out, sv_suffix=sv_suffix, th_suffix=th_suffix)
         calculate_spread(ros_out, suffix, source, spread_out, init_time=init_time, lag=lag, spotting=spotting, sv_suffix=sv_suffix)
         c = raster.raster2numpy(spread_out)
@@ -88,14 +89,18 @@ class Environment:
         while t < lag:
             nt = t + step_size
             nt = min(nt, lag)
-            out_name = 'gt_spread'+'_'+str(nt)
+            out_name = 'gt_spread'
             vs = i%len(self.samplevs)
             th = i%len(self.sampleth)
             # print(f't={t}, nt={nt}, outname={out_name}')
             if t == 0:
-                self.propogate(SOURCE_NAME, t, step_size, suffix=GROUND_TRUTH_SUFFIX, spread_out=out_name, spotting=spotting, sv_suffix=GROUND_TRUTH_SUFFIX + str(vs), th_suffix=GROUND_TRUTH_SUFFIX + str(th))
+                self.propogate(SOURCE_NAME, t, step_size, suffix=GROUND_TRUTH_SUFFIX, spread_out=out_name,
+                               spotting=spotting, sv_suffix=GROUND_TRUTH_SUFFIX + str(vs),
+                               th_suffix=GROUND_TRUTH_SUFFIX + str(th))
             else:
-                self.propogate('gt_spread'+'_'+str(t), t, step_size, suffix=GROUND_TRUTH_SUFFIX, spread_out=out_name, spotting=spotting, sv_suffix=GROUND_TRUTH_SUFFIX + str(vs), th_suffix=GROUND_TRUTH_SUFFIX + str(th))
+                self.propogate(out_name, t, step_size, suffix=GROUND_TRUTH_SUFFIX,
+                               spread_out=out_name, spotting=spotting,
+                               sv_suffix=GROUND_TRUTH_SUFFIX + str(vs), th_suffix=GROUND_TRUTH_SUFFIX + str(th))
             # print(np.max(raster.raster2numpy(out_name)))
             t = nt
             i += 1
@@ -124,8 +129,7 @@ class Environment:
         return {'vs': self.vs[row, col], 'th': self.th[row, col], 'fire_area': np.sum(masked_result), 'firing': masked_result}
 
     def get_on_fire(self, time):
-        flag = np.where(self.ground_truth > 0, self.ground_truth, np.Inf)
         if time > self.simulation_time:
             print(f'Wildfire data is only generated until {self.simulation_time}, but get_on_fire is called for time {time}.')
-        return np.where(flag < time, 1, 0)
+        return np.where((self.ground_truth <= time) & (self.ground_truth > 0), 1, 0)
 
