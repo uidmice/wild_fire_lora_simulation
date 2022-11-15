@@ -58,4 +58,19 @@ class Heuristic_Agent2(Base_Agent):
         burning = kwargs['burning']
         if not fb:
             return np.array([0 for _ in range(len(avail_actions))])
+
         return np.array([int((a > 0) and b) for a, b in zip(fb, burning)]), None
+
+        # return np.array([int((a > 0) and b) + int(not a and not b) for a, b in zip(fb, burning)]), None
+
+class Heuristic_Agent3(Base_Agent):
+    def __init__(self):
+        super(Heuristic_Agent3, self).__init__()
+
+    def select_actions(self, avail_actions, *args, **kwargs):
+        fb = kwargs['fb']
+        burning = kwargs['burning']
+        if not fb:
+            return np.array([0 for _ in range(len(avail_actions))])
+
+        return np.array([int((a > 0) and b) + int(not a and not b) for a, b in zip(fb, burning)]), None

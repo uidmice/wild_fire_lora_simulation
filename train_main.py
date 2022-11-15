@@ -1,5 +1,5 @@
 import sys
-import time, argparse
+import pickle, argparse
 
 import torch
 import numpy as np
@@ -9,7 +9,7 @@ from matplotlib.animation import FuncAnimation
 import datetime
 
 from algorithms.qmix  import QMIX_Agent
-from algorithms.baselines import Base_Agent, Random_Agent, Heuristic_Agent, Heuristic_Agent2
+from algorithms.baselines import Base_Agent, Random_Agent, Heuristic_Agent, Heuristic_Agent2, Heuristic_Agent3
 from train_env import g_env, test_env
 from framework.GRASS import SOURCE_NAME
 
@@ -21,7 +21,7 @@ def parse_args():
     # algorithms
     parser.add_argument(
         "--run",
-        choices=['QMIX', 'BASE', 'RANDOM', 'HEURISTIC1', 'HEURISTIC2', 'GNNQmix'],
+        choices=['QMIX', 'BASE', 'RANDOM', 'HEURISTIC1', 'HEURISTIC2', 'HEURISTIC3', 'GNNQmix'],
         default="QMIX",
         help="The algorithm to use. Options: QMIX, BASE, RANDOM, HEURISTIC, GNNQmix"
     )
@@ -31,16 +31,18 @@ def parse_args():
     parser.add_argument("--alternating-wind", type=int, default=1)
     parser.add_argument("--disable-random-source", dest='random_source', action='store_false')
     parser.add_argument("--spotting", action="store_true")
-    parser.add_argument("--wind-step-size", type=int, default=30)
+    parser.add_argument("--wind-step-size", type=int, default=120)
     parser.add_argument("--disable_single_reward", dest='single_reward', action='store_false')
+    parser.add_argument("--synchronous", action='store_true')
+    parser.add_argument("--limit-observation", action='store_true')
+    parser.add_argument("--mapset", default='grass')
 
     # environment
     parser.add_argument("--seed", type=int, default=123456)
     parser.add_argument("--visualize", action='store_true')
-    parser.add_argument("--save_dir", type=str, default="results_new/new_env", help="model should be saved")
+    parser.add_argument("--save_dir", type=str, default="results_new/new_env_120", help="model should be saved")
     parser.add_argument("--suffix", type=str)
-    parser.add_argument('--enable-store', dest='store', action='store_true')
-    parser.add_argument("--per_episode_max_len", type=int, default=50, help="maximum episode length")
+    parser.add_argument("--per_episode_max_len", type=int, default=30, help="maximum episode length")
     parser.add_argument("--max_episode", type=int, default=1000, help="maximum episode length")
     parser.add_argument("--num_epi4evaluation", type=int, default=10, help="the num for evaluation")
     parser.add_argument("--num_epi4enjoy", type=int, default=40, help="the num for evaluation")
@@ -107,12 +109,15 @@ def train(env, args, agent):
         actions_last = env.last_action
         agent.memory.create_new_episode()
         hidden_last = np.zeros((args.n_agents, args.q_net_hidden_size))
-        fb = [0 for _ in range(args.n_agents)]
+        fb = env.fb
         if args.visualize:
-            real = [env.environment.get_on_fire(k) for k in range(env.step_size, env.T+1, env.step_size)]
+            real = []
             pre = []
+            disregard = []
             points = []
             update_points = []
+            acc = []
+
 
         for epi_step_cnt in range(args.per_episode_max_len):
             step_cnt += 1 # update the cnt every time
@@ -129,6 +134,8 @@ def train(env, args, agent):
             if epi_step_cnt == args.per_episode_max_len-1:
                 done = True # max len of episode
                 dones[:] = 1
+
+
             state_new = env.get_state()
 
             obs_new = env.get_obs()
@@ -148,17 +155,29 @@ def train(env, args, agent):
             episode_reward += rewards
 
             if args.visualize:
+                real.append(infos['burning'])
                 pre.append(infos['predict'])
+                disregard.append(infos['disregard'])
                 points.append([[env.col_idx[i], env.row_idx[i]] for i in infos['sent']])
                 update_points.append([[env.col_idx[i], env.row_idx[i]] for i in infos['received']])
+                acc.append(rewards[0,0])
+
 
             if done:
+                # predata = json.load(open(env.logging, 'r'))
+                # predata.append(env.records)
+                # json.dump(predata, open(env.logging, 'w'))
+                pickle.dump(env.records, open(env.logging, 'ab'))
+                print(f' # of update: {env.records["received"]}')
+                print(f' update time: {env.records["update_time"]}')
+                print(f' predict time: {env.records["predict_time"]}')
                 break
         # agents learn
 
         if args.visualize:
             a = np.array(real)
             b = np.array(pre)
+            dis = np.array(disregard)
 
             fig, ax = plt.subplots(1, 2, sharex=True, sharey=True)
 
@@ -166,14 +185,14 @@ def train(env, args, agent):
                 fig.suptitle(f'$\Delta t={env.step_size}, T = {(i + 1) * env.step_size}$', fontsize=16)
                 ax[0].clear()
                 ax[1].clear()
-                ax[0].imshow(a[i])
-                ax[1].imshow(b[i])
+                ax[0].imshow(a[i] + dis[i])
+                ax[1].imshow(b[i] + dis[i])
                 ax[1].scatter([p[0] for p in points[i]], [p[1] for p in points[i]], color='red')
                 ax[1].scatter([p[0] for p in update_points[i]], [p[1] for p in update_points[i]], color='green')
 
-                e = np.sum(np.absolute(a[i] - b[i]))
+                e = acc[i]
                 ax[0].set_title('Propogation')
-                ax[1].set_title('Prediction, e=%d' % (e))
+                ax[1].set_title(f'Track acc ={e:.4f}')
                 plt.tight_layout()
 
             writer = animation.writers['ffmpeg']
@@ -183,6 +202,75 @@ def train(env, args, agent):
 
         loss = agent.learn(epi_cnt, args, env.logdir)
         print(' ' * 80, 'loss is', loss, end='\r')
+
+
+def run_baselines(env, args, agent):
+    args.max_episode = args.n_agents
+    if args.visualize:
+        args.max_episode = 2
+
+    for epi_cnt in range(args.max_episode):
+        env.reset(epi_cnt)
+        fb = env.fb
+        if args.visualize:
+            real = []
+            pre = []
+            disregard = []
+            points = []
+            update_points = []
+            acc = []
+
+        for epi_step_cnt in range(args.per_episode_max_len):
+            # get obs state for select action
+            avail_actions = env.get_avail_actions()
+
+            # interact with the env and get new state obs
+            actions, hidden = agent.select_actions(avail_actions, fb=fb, burning=env.burning)
+            rewards, dones, done, fb, infos = env.step(actions)
+
+            if epi_step_cnt == args.per_episode_max_len-1:
+                done = True # max len of episode
+                dones[:] = 1
+
+            if args.visualize:
+                real.append(infos['burning'])
+                pre.append(infos['predict'])
+                disregard.append(infos['disregard'])
+                points.append([[env.col_idx[i], env.row_idx[i]] for i in infos['sent']])
+                update_points.append([[env.col_idx[i], env.row_idx[i]] for i in infos['received']])
+                acc.append(rewards[0,0])
+
+            if done:
+                pickle.dump(env.records, open(env.logging, 'ab'))
+                print(f' # of update: {env.records["received"]}')
+                print(f' update time: {env.records["update_time"]}')
+                print(f' predict time: {env.records["predict_time"]}')
+                break
+        if args.visualize:
+            a = np.array(real)
+            b = np.array(pre)
+            dis = np.array(disregard)
+
+            fig, ax = plt.subplots(1, 2, sharex=True, sharey=True)
+
+            def animate(i):
+                fig.suptitle(f'$\Delta t={env.step_size}, T = {(i + 1) * env.step_size}$', fontsize=16)
+                ax[0].clear()
+                ax[1].clear()
+                ax[0].imshow(a[i] + dis[i])
+                ax[1].imshow(b[i] + dis[i])
+                ax[1].scatter([p[0] for p in points[i]], [p[1] for p in points[i]], color='red')
+                ax[1].scatter([p[0] for p in update_points[i]], [p[1] for p in update_points[i]], color='green')
+
+                e = acc[i]
+                ax[0].set_title('Propogation')
+                ax[1].set_title(f'Track acc ={e:.4f}')
+                plt.tight_layout()
+
+            writer = animation.writers['ffmpeg']
+            writer = writer(fps=2, metadata=dict(artist='Me'), bitrate=900)
+            ani = FuncAnimation(fig, animate, len(b), interval=1000)
+            ani.save(f"test_log/{datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}_{args.run}.mp4", writer=writer)
 
 if __name__ == '__main__':
     args = parse_args()
@@ -213,22 +301,26 @@ if __name__ == '__main__':
     args.device = torch.device(args.device)
     agent = None
     if args.run == 'BASE':
-        # agent = Base_Agent()
-        for epi_cnt in range(args.n_agents):
-
-            # init the episode data
-            env.reset(epi_cnt)
-            corrected, vs, th = env.region.model_update([30], 0, SOURCE_NAME)
-            predict, b = env.region.predict(
-                SOURCE_NAME, 0, env.environment.simulation_time, 'predict', spotting=env.spotting)
+        agent = Base_Agent()
+        run_baselines(env, args, agent)
 
     elif args.run == "QMIX" or args.run == "GNNQmix":
         agent = QMIX_Agent(env.obs_dim, env.state_dim, env.n_sensors, [2], args)
+        train(env, args, agent)
+
     elif args.run == 'RANDOM':
         agent = Random_Agent([1-args.random_prob, args.random_prob], env.num_actions, env.n_sensors)
+        train(env, args, agent)
+
     elif args.run == 'HEURISTIC1':
         agent = Heuristic_Agent()
+        train(env, args, agent)
+
     elif args.run == 'HEURISTIC2':
         agent = Heuristic_Agent2()
+        train(env, args, agent)
 
-    train(env, args, agent)
+    elif args.run == 'HEURISTIC3':
+        agent = Heuristic_Agent3()
+        train(env, args, agent)
+

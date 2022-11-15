@@ -3,7 +3,6 @@ import logging, os
 
 from .GRASS import *
 from config import root
-logger = logging.getLogger(__name__)
 
 class Environment:
     def __init__(self, bound, fuel, samplefm, evi, samplevs, sampleth, dem,
@@ -17,6 +16,8 @@ class Environment:
         self.dem = dem
         self.samplevs = samplevs
         self.sampleth = sampleth
+        self.samplefm = samplefm
+        self.evi = evi
         self.varying_wind = isinstance(self.sampleth, list) or isinstance(self.samplevs, list)
         self.step_size = None
         self.res = res
@@ -25,36 +26,50 @@ class Environment:
 
         g.region(raster=fuel)
         g.region(s=bound.s, n=bound.n, w=bound.w, e=bound.e, res=self.res, save=REGION_SAVE_NAME, overwrite=True)
+        g.region(region=REGION_SAVE_NAME, res=res)
 
-        self.vs, self.th = caldata(REGION_SAVE_NAME, GROUND_TRUTH_SUFFIX, self.res, dem=self.dem, samplefm100=samplefm,samplevs=samplevs, sampleth=sampleth, evi=evi)
 
         self.grass_r = Region()
         self.grass_r.get_current()
 
         self.cols = self.grass_r.cols
         self.rows = self.grass_r.rows
+        if isinstance(samplevs, list):
+            self.vs = [np.ones((self.rows, self.cols)) * a for a in samplevs]
+            self.th = [np.ones((self.rows, self.cols)) * a for a in sampleth]
+        else:
+            self.vs, self.th = caldata(REGION_SAVE_NAME, GROUND_TRUTH_SUFFIX, self.res, dem=self.dem, samplefm100=samplefm,samplevs=samplevs, sampleth=sampleth, evi=evi)
+
 
         # row, col
-        dir_tmp = os.path.join(root, "data/source.txt")
-        with open(dir_tmp, "w") as f:
-            f.write('|'.join([str(a) for a in (56978.3098189104, -12406.60548812005)]))
-        script.run_command('v.in.ascii', input=dir_tmp, output=SOURCE_NAME, overwrite=True,
-                           columns='x double precision, y double precision', quiet=True)
-        script.run_command('v.to.rast', input=SOURCE_NAME, output=SOURCE_NAME, type='point', use='cat', overwrite=True, quiet=True)
-
-        self.source = raster.raster2numpy(SOURCE_NAME)
-        self.source[self.source<0] = 0
+        # dir_tmp = os.path.join(root, "data/source.txt")
+        # with open(dir_tmp, "w") as f:
+        #     f.write('|'.join([str(a) for a in (56978.3098189104, -12406.60548812005)]))
+        # script.run_command('v.in.ascii', input=dir_tmp, output=SOURCE_NAME, overwrite=True,
+        #                    columns='x double precision, y double precision', quiet=True)
+        # script.run_command('v.to.rast', input=SOURCE_NAME, output=SOURCE_NAME, type='point', use='cat', overwrite=True, quiet=True)
+        #
+        # self.source = raster.raster2numpy(SOURCE_NAME)
+        # self.source[self.source<0] = 0
 
         self.simulation_time = 0
 
     def set_source(self, cells):
-        s = raster.RasterSegment(SOURCE_NAME)
-        s.open('rw', overwrite=True)
-        for i in range(self.rows):
-            for j in range(self.cols):
-                s[i, j] = 0
+        # m = raster.Buffer((self.rows, self.cols), buffer = np.zeros((self.rows, self.cols)).astype(int))
+        m = np.zeros((self.rows, self.cols)).astype('int32')
         for c in cells:
-            s[c[0], c[1]] = 1
+            m[c[0], c[1]] = 1
+
+        s = raster.RasterRow(SOURCE_NAME)
+        s.open('w', overwrite=True)
+        for i in range(self.rows):
+            # s.put_row(m[i])
+            s.put_row(raster.Buffer(shape=(self.cols, ), buffer=m[i]))
+        # for i in range(self.rows):
+        #     for j in range(self.cols):
+        #         s[i, j] = 0
+        # for c in cells:
+        #     m[c[0], c[1]] = 1
         s.close()
         self.source = raster.raster2numpy(SOURCE_NAME)
         self.source[self.source < 0] = 0
@@ -62,6 +77,7 @@ class Environment:
 
     def propogate(self, source, init_time, lag, suffix=GROUND_TRUTH_SUFFIX, ros_out='gt_out', spread_out='gt_spread',
                   spotting=False, middle_state=None, sv_suffix=None, th_suffix=None):
+
         calculate_ros(suffix, ros_out, sv_suffix=sv_suffix, th_suffix=th_suffix)
         calculate_spread(ros_out, suffix, source, spread_out, init_time=init_time, lag=lag, spotting=spotting, sv_suffix=sv_suffix)
         c = raster.raster2numpy(spread_out)
@@ -77,6 +93,9 @@ class Environment:
 
     def generate_wildfire(self, lag, spotting=False):
         out_name = 'gt_spread'+'_'+str(lag)
+        self.vs, self.th = caldata(REGION_SAVE_NAME, GROUND_TRUTH_SUFFIX, self.res, dem=self.dem, samplefm100=self.samplefm,
+                                   samplevs=self.samplevs, sampleth=self.sampleth, evi=self.evi)
+
         self.propogate(SOURCE_NAME, 0, lag, spread_out=out_name, spotting=spotting)
         self.ground_truth = raster.raster2numpy(out_name).astype(float) + self.source
         self.simulation_time = lag
@@ -86,6 +105,8 @@ class Environment:
         t = 0
         i = 0
         self.step_size = step_size
+        self.vs, self.th = caldata(REGION_SAVE_NAME, GROUND_TRUTH_SUFFIX, self.res, dem=self.dem, samplefm100=self.samplefm,
+                                   samplevs=self.samplevs, sampleth=self.sampleth, evi=self.evi)
         while t < lag:
             nt = t + step_size
             nt = min(nt, lag)

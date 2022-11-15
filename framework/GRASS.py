@@ -18,6 +18,13 @@ SOURCE_NAME = 'source'
 
 
 def grass_init(gisdb, location, mapset):
+    gsetup.init(gisdb, location, "PERMANENT")
+
+    try:
+        g.mapset(flags='c', mapset=mapset, location=location)
+    except:
+        print('mapset error')
+
     cfile = gsetup.init(gisdb, location, mapset)
 
     gs.message("Current GRASS GIS 8 environment:")
