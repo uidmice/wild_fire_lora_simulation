@@ -48,36 +48,61 @@ def uniformMap(regname, value, output_name, res):
     script.run_command('v.surf.idw', input='vsuniform', output=output_name, column='value', overwrite=True,
                        quiet=True)
 
-def caldata(regname, suffix, res, dem='dem', samplefm100='samplefm100',samplevs='samplevs', sampleth='sampleth', evi='evi'):
+
+
+def caldata_wind_uneven(regname, suffix, res, locations, samplevs, sampleth, logdir):
+    g.region(region=regname, res=res)
+
+    x, y = [loc[0] for loc in locations], [loc[1] for loc in locations]
+
+    with open(os.path.join(logdir, "wind.txt"), "w") as f:
+        for c in zip(y, x, samplevs, sampleth):
+            f.write('|'.join([str(a) for a in c]) + '\n')
+
+    script.run_command('v.in.ascii', input=os.path.join(logdir, "wind.txt"), output='wind', overwrite=True,
+                       columns='x double precision, y double precision, vsfpm double precision, mean double precision',
+                       quiet=True)
+    vs, th = caldata_wind(regname, suffix, res, samplevs='wind',sampleth='wind')
+    return vs, th
+
+def caldata_wind(regname, suffix, res, samplevs='samplevs', sampleth='sampleth'):
+    g.region(region=regname, res=res)
+
+    if isinstance(samplevs, (int, float)):
+        uniformMap(regname, samplevs, WIND_SPEED + suffix, res)
+        vs = raster.raster2numpy(WIND_SPEED + suffix)
+    elif isinstance(samplevs, list):
+        vs = []
+        for i in range(len(samplevs)):
+            uniformMap(regname, samplevs[i], WIND_SPEED + suffix + str(i), res)
+            vs.append(raster.raster2numpy(WIND_SPEED + suffix + str(i)))
+    else:
+        script.run_command('v.surf.idw', input=samplevs, output=WIND_SPEED + suffix, column='vsfpm', overwrite=True,
+                           quiet=True)
+        vs = raster.raster2numpy(WIND_SPEED + suffix)
+
+    if isinstance(sampleth, (int, float)):
+        uniformMap(regname, sampleth, WIND_DIR + suffix, res)
+        th = raster.raster2numpy(WIND_DIR + suffix)
+    elif isinstance(sampleth, list):
+        th = []
+        for i in range(len(sampleth)):
+            uniformMap(regname, sampleth[i], WIND_DIR + suffix + str(i), res)
+            th.append(raster.raster2numpy(WIND_DIR + suffix + str(i)))
+    else:
+        script.run_command('v.surf.idw', input=sampleth, output=WIND_DIR + suffix, column='mean', overwrite=True,
+                           quiet=True)
+        th = raster.raster2numpy(WIND_DIR + suffix)
+
+    return vs, th
+
+
+def caldata_base(regname, suffix, res, dem='dem', samplefm100='samplefm100', evi='evi'):
     try:
         g.region(region=regname, res=res)
 
         script.run_command('r.slope.aspect', elevation=dem, slope='slope' + suffix, aspect='aspect' + suffix, overwrite=True, quiet = True)
         script.run_command('v.surf.idw', input=samplefm100, output='moisture_100h' + suffix, column='mean', overwrite=True, quiet = True)
-
-        if isinstance(samplevs, (int, float)):
-            uniformMap(regname, samplevs, WIND_SPEED+ suffix, res)
-            vs = raster.raster2numpy(WIND_SPEED + suffix)
-        elif isinstance(samplevs, list):
-            vs = []
-            for i in range(len(samplevs)):
-                uniformMap(regname, samplevs[i], WIND_SPEED + suffix + str(i), res)
-                vs.append(raster.raster2numpy(WIND_SPEED + suffix+ str(i)))
-        else:
-            script.run_command('v.surf.idw', input=samplevs, output= WIND_SPEED+ suffix, column='vsfpm', overwrite=True, quiet = True)
-            vs = raster.raster2numpy(WIND_SPEED + suffix)
-
-        if isinstance(sampleth, (int, float)):
-            uniformMap(regname, sampleth, WIND_DIR+ suffix, res)
-            th = raster.raster2numpy(WIND_DIR + suffix)
-        elif isinstance(sampleth, list):
-            th = []
-            for i in range(len(sampleth)):
-                uniformMap(regname, sampleth[i], WIND_DIR + suffix + str(i), res)
-                th.append(raster.raster2numpy(WIND_DIR + suffix+ str(i)))
-        else:
-            script.run_command('v.surf.idw', input=sampleth, output= WIND_DIR+ suffix, column='mean', overwrite=True, quiet = True)
-            th = raster.raster2numpy(WIND_DIR + suffix)
 
         ss1 = 'moisture_1h'
         lfm = 'lfm'
@@ -92,8 +117,6 @@ def caldata(regname, suffix, res, dem='dem', samplefm100='samplefm100',samplevs=
         # rescale LFM to 0-100
         output = lfm + suffix + '_scaled'
         r.rescale(input='lfm' + suffix, output=output, to=(0, 100), overwrite=True, quiet = True)
-
-        return vs, th
 
     except:
         print("Something went wrong")

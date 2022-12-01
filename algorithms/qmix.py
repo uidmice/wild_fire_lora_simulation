@@ -117,7 +117,8 @@ class QMIX_Agent(Base_Agent):
         new_obs_and_u_t_b = torch.from_numpy(obs_new_n).to(args.device, dtype=torch.float)
         new_avail_act_t_b = (torch.from_numpy(new_avail_act_n)>0).to(args.device)
         state_new_t_b = torch.from_numpy(state_new_n).to(args.device, dtype=torch.float)
-        r_t_b = torch.sum(torch.from_numpy(r_n).to(args.device, dtype=torch.float) , dim=-1) - 1
+        r_n = r_n @ np.array(self.args.reward_weights)
+        r_t_b = torch.from_numpy(r_n).to(args.device, dtype=torch.float)
         done_t_b = torch.from_numpy(1-done_n).to(args.device, dtype=torch.float) # be careful for this action
         max_episode_len = state_new_n[0].shape[0]
 

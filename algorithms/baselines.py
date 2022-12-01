@@ -44,9 +44,27 @@ class Heuristic_Agent(Base_Agent):
 
     def select_actions(self, avail_actions, *args, **kwargs):
         fb = kwargs['fb']
+        burning = kwargs['burning']
         if not fb:
             return np.array([0 for _ in range(len(avail_actions))])
-        return np.array([int(a == 2) for a in fb]), None
+
+        arg = kwargs['args']
+        if arg.run == 'HEURISTIC1':
+            return np.array([int(a == 2) for a in fb]), None
+
+        elif arg.run == 'HEURISTIC2':
+            return np.array([int((a > 0) and b) for a, b in zip(fb, burning)]), None
+
+        elif arg.run == 'HEURISTIC3':
+            return np.array([int((a > 0) and b) + int(not a and not b) for a, b in zip(fb, burning)]), None
+
+        elif arg.run == 'HEURISTIC4':
+            temp = np.array([int((a > 0) and b) + int(not a and not b) for a, b in zip(fb, burning)])
+            return temp * np.random.choice([0,1], size=len(fb), replace=True, p=[1-arg.random_prob, arg.random_prob]), None
+        else:
+            raise ValueError
+
+
 
 
 class Heuristic_Agent2(Base_Agent):

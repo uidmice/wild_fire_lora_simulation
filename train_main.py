@@ -21,7 +21,7 @@ def parse_args():
     # algorithms
     parser.add_argument(
         "--run",
-        choices=['QMIX', 'BASE', 'RANDOM', 'HEURISTIC1', 'HEURISTIC2', 'HEURISTIC3', 'GNNQmix'],
+        choices=['QMIX', 'BASE', 'RANDOM', 'HEURISTIC1', 'HEURISTIC2', 'HEURISTIC3', 'HEURISTIC4', 'GNNQmix'],
         default="QMIX",
         help="The algorithm to use. Options: QMIX, BASE, RANDOM, HEURISTIC, GNNQmix"
     )
@@ -35,6 +35,7 @@ def parse_args():
     parser.add_argument("--disable_single_reward", dest='single_reward', action='store_false')
     parser.add_argument("--synchronous", action='store_true')
     parser.add_argument("--limit-observation", action='store_true')
+    parser.add_argument("--uneven-wind", action='store_true')
     parser.add_argument("--mapset", default='grass')
 
     # environment
@@ -62,6 +63,8 @@ def parse_args():
     parser.add_argument("--tar_net_update_fre", type=int, default=3, help="learning rounds for update target net")
     parser.add_argument("--memory_size", type=int, default=100, help="number of data stored in the memory")
     parser.add_argument("--batch_size", type=int, default=20, help="number of episodes to optimize at the same time")
+    parser.add_argument("--reward_weights", type=list, default=[0.5, 0.5])
+
     parser.add_argument(
         "--mixer",
         choices=['QMIX', 'VDN', 'NONE', 'GraphMix'],
@@ -128,7 +131,7 @@ def train(env, args, agent):
             avail_actions = env.get_avail_actions()
 
             # interact with the env and get new state obs
-            actions, hidden = agent.select_actions(avail_actions, obs, actions_last, hidden_last, args,  eval_flag=False, fb=fb, burning=env.burning)
+            actions, hidden = agent.select_actions(avail_actions, obs, actions_last, hidden_last, args=args,  eval_flag=False, fb=fb, burning=env.burning)
             rewards, dones, done, fb, infos = env.step(actions)
 
             if epi_step_cnt == args.per_episode_max_len-1:
@@ -225,7 +228,7 @@ def run_baselines(env, args, agent):
             avail_actions = env.get_avail_actions()
 
             # interact with the env and get new state obs
-            actions, hidden = agent.select_actions(avail_actions, fb=fb, burning=env.burning)
+            actions, hidden = agent.select_actions(avail_actions, args=args, fb=fb, burning=env.burning)
             rewards, dones, done, fb, infos = env.step(actions)
 
             if epi_step_cnt == args.per_episode_max_len-1:
@@ -278,12 +281,12 @@ if __name__ == '__main__':
     # args.visualize = True
     # args.wind_step_size = 30
     # args.learning_start_episode = 1
-    # args.per_episode_max_len = 50
+    # args.per_episode_max_len = 3
     # args.learning_fre = 2
     # args.mixer = 'GraphMix'
     # args.double_q = True
     # args.run= "HEURISTIC2"
-    # args.batch_size = 3
+    # args.batch_size = 2
     # args.fre4save_model = 3
 
     if args.device == 'cuda' and not torch.cuda.is_available():
@@ -312,15 +315,8 @@ if __name__ == '__main__':
         agent = Random_Agent([1-args.random_prob, args.random_prob], env.num_actions, env.n_sensors)
         train(env, args, agent)
 
-    elif args.run == 'HEURISTIC1':
+    elif 'HEURISTIC' in args.run:
         agent = Heuristic_Agent()
         train(env, args, agent)
 
-    elif args.run == 'HEURISTIC2':
-        agent = Heuristic_Agent2()
-        train(env, args, agent)
-
-    elif args.run == 'HEURISTIC3':
-        agent = Heuristic_Agent3()
-        train(env, args, agent)
 

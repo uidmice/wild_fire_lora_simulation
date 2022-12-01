@@ -9,7 +9,8 @@ class Environment:
                  gisbd ,
                  location,
                  mapset,
-                 res=10):
+                 res=10,
+                 uneven=False):
 
         self.bound = bound
         self.fuel = fuel
@@ -18,7 +19,8 @@ class Environment:
         self.sampleth = sampleth
         self.samplefm = samplefm
         self.evi = evi
-        self.varying_wind = isinstance(self.sampleth, list) or isinstance(self.samplevs, list)
+        self.uniform_wind = isinstance(self.sampleth, list) or isinstance(self.samplevs, list) or uneven
+        self.uneven_wind = uneven
         self.step_size = None
         self.res = res
 
@@ -34,23 +36,14 @@ class Environment:
 
         self.cols = self.grass_r.cols
         self.rows = self.grass_r.rows
+        caldata_base(REGION_SAVE_NAME, GROUND_TRUTH_SUFFIX, self.res, dem=self.dem, samplefm100=samplefm, evi=evi)
+
         if isinstance(samplevs, list):
             self.vs = [np.ones((self.rows, self.cols)) * a for a in samplevs]
             self.th = [np.ones((self.rows, self.cols)) * a for a in sampleth]
-        else:
-            self.vs, self.th = caldata(REGION_SAVE_NAME, GROUND_TRUTH_SUFFIX, self.res, dem=self.dem, samplefm100=samplefm,samplevs=samplevs, sampleth=sampleth, evi=evi)
 
-
-        # row, col
-        # dir_tmp = os.path.join(root, "data/source.txt")
-        # with open(dir_tmp, "w") as f:
-        #     f.write('|'.join([str(a) for a in (56978.3098189104, -12406.60548812005)]))
-        # script.run_command('v.in.ascii', input=dir_tmp, output=SOURCE_NAME, overwrite=True,
-        #                    columns='x double precision, y double precision', quiet=True)
-        # script.run_command('v.to.rast', input=SOURCE_NAME, output=SOURCE_NAME, type='point', use='cat', overwrite=True, quiet=True)
-        #
-        # self.source = raster.raster2numpy(SOURCE_NAME)
-        # self.source[self.source<0] = 0
+        elif samplevs is not None:
+            self.vs, self.th = caldata_wind(REGION_SAVE_NAME, GROUND_TRUTH_SUFFIX, self.res, samplevs=samplevs, sampleth=sampleth)
 
         self.simulation_time = 0
 
@@ -63,13 +56,7 @@ class Environment:
         s = raster.RasterRow(SOURCE_NAME)
         s.open('w', overwrite=True)
         for i in range(self.rows):
-            # s.put_row(m[i])
             s.put_row(raster.Buffer(shape=(self.cols, ), buffer=m[i]))
-        # for i in range(self.rows):
-        #     for j in range(self.cols):
-        #         s[i, j] = 0
-        # for c in cells:
-        #     m[c[0], c[1]] = 1
         s.close()
         self.source = raster.raster2numpy(SOURCE_NAME)
         self.source[self.source < 0] = 0
@@ -93,8 +80,8 @@ class Environment:
 
     def generate_wildfire(self, lag, spotting=False):
         out_name = 'gt_spread'+'_'+str(lag)
-        self.vs, self.th = caldata(REGION_SAVE_NAME, GROUND_TRUTH_SUFFIX, self.res, dem=self.dem, samplefm100=self.samplefm,
-                                   samplevs=self.samplevs, sampleth=self.sampleth, evi=self.evi)
+        self.vs, self.th = caldata_wind(REGION_SAVE_NAME, GROUND_TRUTH_SUFFIX, self.res,
+                                        samplevs=self.samplevs, sampleth=self.sampleth)
 
         self.propogate(SOURCE_NAME, 0, lag, spread_out=out_name, spotting=spotting)
         self.ground_truth = raster.raster2numpy(out_name).astype(float) + self.source
@@ -105,12 +92,13 @@ class Environment:
         t = 0
         i = 0
         self.step_size = step_size
-        self.vs, self.th = caldata(REGION_SAVE_NAME, GROUND_TRUTH_SUFFIX, self.res, dem=self.dem, samplefm100=self.samplefm,
-                                   samplevs=self.samplevs, sampleth=self.sampleth, evi=self.evi)
+        self.vs, self.th = caldata_wind(REGION_SAVE_NAME, GROUND_TRUTH_SUFFIX, self.res,
+                                        samplevs=self.samplevs, sampleth=self.sampleth)
+        out_name = 'gt_spread'
+
         while t < lag:
             nt = t + step_size
             nt = min(nt, lag)
-            out_name = 'gt_spread'
             vs = i%len(self.samplevs)
             th = i%len(self.sampleth)
             # print(f't={t}, nt={nt}, outname={out_name}')
@@ -129,6 +117,55 @@ class Environment:
         self.simulation_time = lag
         return self.ground_truth
 
+    def generate_wildfire_uneven_wind(self, lag, step_size, logdir, npoints=6, nvarpoints=3, spotting=False):
+        t = 0
+        i = 0
+        self.step_size = step_size
+        self.vs, self.th = [], []
+        out_name = 'gt_spread'
+
+        location_x = np.random.uniform(self.grass_r.south, self.grass_r.north, npoints)
+        location_y = np.random.uniform(self.grass_r.west, self.grass_r.east, npoints)
+        locations = [[x,y] for x,y in zip(location_x, location_y)]
+
+        samplevs = np.random.uniform(200, 800, npoints)
+        sampleth = np.random.uniform(0, 350, npoints)
+
+        while t < lag:
+            nt = t + step_size
+            nt = min(nt, lag)
+
+            random_select = np.random.choice(npoints, nvarpoints, replace=False)
+            for p in random_select:
+                samplevs[p] = samplevs[p] + np.random.uniform(-100, 100)
+                if samplevs[p] < 100:
+                    samplevs[p] = 100
+                elif samplevs[p] > 1000:
+                    samplevs[p] = 1000
+
+                sampleth[p] = sampleth[p] + np.random.uniform(-90, 90)
+                while sampleth[p] < 0:
+                    sampleth[p]  = sampleth[p] + 360
+                while sampleth[p] >= 360:
+                    sampleth[p]  = sampleth[p] - 360
+
+            vs, th = caldata_wind_uneven(REGION_SAVE_NAME, GROUND_TRUTH_SUFFIX+str(i), self.res, locations, samplevs, sampleth, logdir)
+            self.vs.append(vs)
+            self.th.append(th)
+            if t == 0:
+                self.propogate(SOURCE_NAME, t, step_size, suffix=GROUND_TRUTH_SUFFIX, spread_out=out_name,
+                               spotting=spotting, sv_suffix=GROUND_TRUTH_SUFFIX + str(i),
+                               th_suffix=GROUND_TRUTH_SUFFIX + str(i))
+            else:
+                self.propogate(out_name, t, step_size, suffix=GROUND_TRUTH_SUFFIX,
+                               spread_out=out_name, spotting=spotting, sv_suffix=GROUND_TRUTH_SUFFIX + str(i),
+                               th_suffix=GROUND_TRUTH_SUFFIX + str(i))
+            t = nt
+            i += 1
+        self.ground_truth = raster.raster2numpy(out_name).astype(float) + self.source
+        self.simulation_time = lag
+        return self.ground_truth, self.vs, self.th
+
     def print_region(self):
         print(g.region(flags='p'))
 
@@ -136,14 +173,20 @@ class Environment:
         os.remove(self.grass_proc)
 
     def sense(self, row, col, time):
-        if self.varying_wind:
+        if self.uneven_wind:
+            return {'vs': self.vs[(time//self.step_size)][row, col], 'th': self.th[(time//self.step_size)][row, col], 'fire': self.ground_truth[row, col] < time}
+
+        if self.uniform_wind:
             return {'vs': self.vs[(time//self.step_size)%len(self.samplevs)][row, col], 'th': self.th[(time//self.step_size)%len(self.samplevs)][row, col], 'fire': self.ground_truth[row, col] < time}
         return {'vs': self.vs[row, col], 'th': self.th[row, col], 'fire': self.ground_truth[row, col] < time}
 
     def sense_region(self, row, col, mask, time):
         firing = np.where ((self.ground_truth <= time) & (self.ground_truth > 0), 1, 0)
         masked_result = firing * mask
-        if self.varying_wind:
+        if self.uneven_wind:
+            return {'vs': self.vs[(time//self.step_size)][row, col], 'th': self.th[(time//self.step_size)][row, col], 'fire_area': np.sum(masked_result), 'firing': masked_result}
+
+        if self.uniform_wind:
             r = {'vs': self.vs[(time//self.step_size)%len(self.samplevs)][row, col], 'th': self.th[(time//self.step_size)%len(self.sampleth)][row, col],
                     'fire_area': np.sum(masked_result), 'firing': masked_result}
             return r

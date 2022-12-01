@@ -1,5 +1,5 @@
 import time
-import pickle, datetime, json
+import pickle, datetime, json, os
 
 import torch
 
@@ -42,6 +42,16 @@ AGENT_STATE = {
     'SF': 4
 }
 
+def loadall(filename):
+    rt = []
+    with open(filename, "rb") as f:
+        while True:
+            try:
+                rt.append(pickle.load(f))
+            except EOFError:
+                break
+    return rt
+
 
 class g_env:
     def __init__(self,  args):
@@ -66,7 +76,10 @@ class g_env:
         self.spotting = args.spotting
         bound = Bound(57992, 54747, -14955, -11471)
 
-        if self.args.alternating_wind:
+        if hasattr(self.args, 'uneven_wind') and self.args.uneven_wind:
+            self.environment = Environment(bound, 'fuel', 'samplefm100', 'evi', None,
+                                          None, 'dem', gisdb, location, args.mapset, 10, self.args.uneven_wind)
+        elif self.args.alternating_wind:
             self.wind_vs = [600, 600, 700, 500, 600, 300, 450, 500, 400, 400]
             self.wind_th = [200, 100, 20, 20, 20, 20, 100, 90, 90, 100]
             self.environment = Environment(bound, 'fuel', 'samplefm100', 'evi', self.wind_vs,
@@ -135,28 +148,46 @@ class g_env:
         if self.args.limit_observation:
             fn += '_limit'
 
+        if hasattr(self.args, 'uneven_wind') and self.args.uneven_wind:
+                fn += '_uneven'
 
-        try:
-            self.ground_truths = pickle.load(open(f'{fn}.pk', 'rb'))
-        except:
-            ground_truths = []
+        self.gt_data = fn
+
+
+        # try:
+        #     load_data = loadall(fn)
+        #     self.ground_truths = load_data[0]
+        #     if len(load_data)> 1:
+        #         self.wind_vs = load_data[1]
+        #         self.wind_th = load_data[2]
+
+        self.bad_episodes = []
+
+        if not os.path.exists(fn):
+            os.mkdir(fn)
             for i in range(self.n_sensors):
                 print(i)
                 self.environment.set_source(self.region.cell_set[i])
                 if self.args.alternating_wind:
-                    self.environment.generate_wildfire_alternate(self.T + FUTURE_STEPS * self.step_size,
+                    if hasattr(self.args, 'uneven_wind') and self.args.uneven_wind:
+                        self.environment.generate_wildfire_uneven_wind(self.T + FUTURE_STEPS * self.step_size,
+                                                                 self.step_size * self.args.alternating_wind,
+                                                                self.logdir, spotting=self.spotting)
+                    else:
+                        self.environment.generate_wildfire_alternate(self.T + FUTURE_STEPS * self.step_size,
                                                                  self.step_size * self.args.alternating_wind,
                                                                  spotting=self.spotting)
                 else:
                     self.environment.generate_wildfire(self.T + FUTURE_STEPS * self.step_size, spotting=self.spotting)
-                ground_truths.append(self.environment.ground_truth.copy())
-            pickle.dump(ground_truths, open(f'{fn}.pk', 'wb'))
-            self.ground_truths = ground_truths
 
-        self.bad_episodes = []
-        for i in range(self.n_sensors):
-            if np.sum(self.ground_truths[i]) < 1000:
-                self.bad_episodes.append(i)
+                pickle.dump([self.environment.ground_truth, self.environment.vs, self.environment.th], open(f'{fn}/wind_{i}.pk', 'wb'))
+                if np.sum(self.environment.ground_truth) < 1000:
+                    self.bad_episodes.append(i)
+
+            json.dump(self.bad_episodes, open(f'{fn}/bad.txt', 'w'))
+        else:
+            self.bad_episodes = json.load(open(f'{fn}/bad.txt', 'r'))
+
 
 
     def seed(self, s):
@@ -166,6 +197,7 @@ class g_env:
         random.seed(s)
 
     def reset(self, a=None):
+        self.region.reset()
         print('----------EPS {}----------'.format(self.eps))
         self.eps += 1
         self.I = 0
@@ -176,7 +208,10 @@ class g_env:
             while a in self.bad_episodes:
                 a = np.random.choice(self.n_sensors)
             self.environment.set_source(self.region.cell_set[a])
-            self.environment.ground_truth = self.ground_truths[a]
+            self.environment.ground_truth, self.environment.vs, self.environment.th = pickle.load(open(f'{self.gt_data}/wind_{a}.pk', 'rb'))
+            if self.args.uneven_wind:
+                self.wind_vs = self.environment.vs
+                self.wind_th = self.environment.th
 
         self.records = {
             'source': a,
@@ -207,7 +242,6 @@ class g_env:
         self.last_update = np.zeros(self.n_sensors)
 
         self.disregard_area = np.zeros((self.environment.rows, self.environment.cols))
-
 
 
     def take_action(self, actions, step_size):
@@ -274,21 +308,25 @@ class g_env:
             rewards[:, 1] *= 1- len(send_index)/self.n_sensors
             print(f'reward: {np.average(rewards, axis=0)}')
         else:
+            diff_p = np.absolute(self.burning - self.last_p)
             for i in range(self.n_sensors):
                 if i in self.dead_sensors:
                     rewards[i] = 0
-                elif i in send_index:
+                else:
+                    if i in send_index:
+                        if i not in received:
+                            rewards[i, 1] = -1
+                        else:
+                            rewards[i, 1] = 0
+
                     if i in corrected:
                         rewards[i, 0] = 1
-                    elif i not in received:
-                        rewards[i, 1] = -2
+                    elif diff_p[i]:
+                        rewards[i, 0] = -1
                     else:
-                        rewards[i, 1] = -1
-                elif diff[i]:
-                    rewards[i, 0] = -1
-                else:
-                    rewards[i] = 0
+                        rewards[i, 0] = 0
             print(f'reward: {np.average(rewards, axis=0)}\n {rewards[:,0]}\n {rewards[:,1]} ')
+
 
 
         fb = (FUTURE_STEPS + 1 - np.sum(future_b, axis=0)).tolist()
@@ -326,6 +364,9 @@ class g_env:
         self.records['sf'].append([self.communication.get_sensor_para(i)[1] for i in range(self.n_sensors)])
         self.records['update_time'].append(t1 - start)
         self.records['predict_time'].append(t2 - t1)
+        self.records['last_status_cell'] = burning_cell
+        self.records['last_predict_cell'] = self.last_p_cell
+
 
 
         self.I += self.step_size

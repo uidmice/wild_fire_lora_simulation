@@ -126,7 +126,7 @@ class Region:
 
         script.run_command('v.in.ascii', input=os.path.join(self.logdir, "temp.txt"), output='sample', overwrite=True,
                            columns='x double precision, y double precision, vsfpm double precision, mean double precision', quiet=True)
-        vs, th = caldata(REGION_SAVE_NAME, PREDICTION_SUFFIX + suffix, self.env.res, samplevs='sample', sampleth='sample')
+        vs, th = caldata_wind(REGION_SAVE_NAME, PREDICTION_SUFFIX + suffix, self.env.res, samplevs='sample', sampleth='sample')
         return corrected, vs, th
 
 

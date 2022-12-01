@@ -19,7 +19,7 @@ class FieldReconstructor:
 
     def model_update(self, suffix=''):
         script.run_command('v.in.ascii', input='data/temp.txt', output='sample', overwrite=True, columns='x double precision, y double precision, vsfpm double precision, mean double precision')
-        caldata(REGION_SAVE_NAME, PREDICTION_SUFFIX+suffix, self.env.res, samplevs='sample', sampleth='sample')
+        caldata_wind(REGION_SAVE_NAME, PREDICTION_SUFFIX + suffix, self.env.res, samplevs='sample', sampleth='sample')
         self.vs = raster.raster2numpy(WIND_SPEED + PREDICTION_SUFFIX+suffix)
         self.th = raster.raster2numpy(WIND_DIR + PREDICTION_SUFFIX+suffix)
         self.update_required = False
