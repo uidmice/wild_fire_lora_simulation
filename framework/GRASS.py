@@ -130,9 +130,9 @@ def calculate_ros(suffix, output_name, sv_suffix=None, th_suffix=None):
     if not th_suffix:
         th_suffix = suffix
     try:
-        r.ros(model='fuel', moisture_1h='moisture_1h'+suffix,
-            moisture_live='lfm'+suffix+'_scaled', velocity=WIND_SPEED+sv_suffix,
-            direction=WIND_DIR+th_suffix, slope='slope'+suffix, aspect='aspect'+suffix,
+        r.ros(model='fuel', moisture_1h='moisture_1h'+GROUND_TRUTH_SUFFIX,
+            moisture_live='lfm'+GROUND_TRUTH_SUFFIX+'_scaled', velocity=WIND_SPEED+sv_suffix,
+            direction=WIND_DIR+th_suffix, slope='slope'+GROUND_TRUTH_SUFFIX, aspect='aspect'+GROUND_TRUTH_SUFFIX,
             elevation='dem', base_ros=output_name+'.base',
             max_ros=output_name+'.max', direction_ros=output_name+'.dir',
             spotting_distance=output_name+'.spotting', overwrite=True, quiet = True)
@@ -154,12 +154,12 @@ def calculate_spread(input_name, suffix, source, output_name, init_time=0, lag=6
         script.run_command('r.spread', flags=f, base_ros=input_name+'.base', max_ros=input_name+'.max',
             direction_ros=input_name+'.dir', start=source,
             spotting_distance=input_name+'.spotting', wind_speed=WIND_SPEED+sv_suffix,
-            fuel_moisture='moisture_1h'+suffix, output=output_name, init_time=init_time, lag=lag, overwrite=True, quiet = True)
+            fuel_moisture='moisture_1h'+GROUND_TRUTH_SUFFIX, output=output_name, init_time=init_time, lag=lag, overwrite=True, quiet = True)
     else:
         script.run_command('r.spread', flags=f, base_ros=input_name+'.base', max_ros=input_name+'.max',
             direction_ros=input_name+'.dir', start=source,
             spotting_distance=input_name+'.spotting', wind_speed=WIND_SPEED+suffix,
-            fuel_moisture='moisture_1h'+suffix, output=output_name,  lag=lag, overwrite=True, quiet = True)
+            fuel_moisture='moisture_1h'+GROUND_TRUTH_SUFFIX, output=output_name,  lag=lag, overwrite=True, quiet = True)
 
     # r.null(map=output_name, setnull=0)
     #
