@@ -238,6 +238,7 @@ class UplinkPacket():
         if self.time_on_air is None:
             self.time_on_air = airtime(self.para.sf, self.para.bw, self.para.cr, self.para.h, self.para.de,
                                        self.payload_size)
+            print('time on air' + str(self.time_on_air))
         return self.time_on_air
 
     def change_freq_to(self, freq):

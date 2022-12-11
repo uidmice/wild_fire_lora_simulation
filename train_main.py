@@ -32,11 +32,28 @@ def parse_args():
     parser.add_argument("--disable-random-source", dest='random_source', action='store_false')
     parser.add_argument("--spotting", action="store_true")
     parser.add_argument("--wind-step-size", type=int, default=120)
-    parser.add_argument("--disable_single_reward", dest='single_reward', action='store_false')
+    parser.add_argument("--disable-single-reward", dest='single_reward', action='store_false')
     parser.add_argument("--synchronous", action='store_true')
     parser.add_argument("--limit-observation", action='store_true')
     parser.add_argument("--uneven-wind", action='store_true')
     parser.add_argument("--mapset", default='grass')
+    parser.add_argument('--use-tracking-acc', action='store_true')
+    parser.add_argument('--unknown-source', action='store_true')
+    parser.add_argument('--simplified-state', action='store_true')
+    parser.add_argument("--reward-weights", type=list, default=[0.5, 0.5])
+
+    parser.add_argument(
+        "--mixer",
+        choices=['QMIX', 'VDN', 'NONE', 'GraphMix'],
+        default="QMIX"
+    )
+
+    # random
+    parser.add_argument(
+        "--random-prob", type=float, default=0.05, help="The probability of sending of random policies (default: 0.5)"
+    )
+
+
 
     # environment
     parser.add_argument("--seed", type=int, default=123456)
@@ -63,13 +80,7 @@ def parse_args():
     parser.add_argument("--tar_net_update_fre", type=int, default=3, help="learning rounds for update target net")
     parser.add_argument("--memory_size", type=int, default=100, help="number of data stored in the memory")
     parser.add_argument("--batch_size", type=int, default=20, help="number of episodes to optimize at the same time")
-    parser.add_argument("--reward_weights", type=list, default=[0.5, 0.5])
 
-    parser.add_argument(
-        "--mixer",
-        choices=['QMIX', 'VDN', 'NONE', 'GraphMix'],
-        default="QMIX"
-    )
     # qmix
     parser.add_argument("--q_net_out", type=list, default=[32, 32], help="size of layers feature in q_net")
     parser.add_argument("--mix_net_out", type=list, default=[32, 1], help="size of layers feature in q_net")
@@ -82,10 +93,7 @@ def parse_args():
     parser.add_argument("--gnn_out_dim", type=list, default=24)
     parser.add_argument("--lambda_local", type=float, default=1)
 
-    # random
-    parser.add_argument(
-        "--random-prob", type=float, default=0.05, help="The probability of sending of random policies (default: 0.5)"
-    )
+
     # checkpointing
     parser.add_argument("--fre4save_model", type=int, default=6)
     parser.add_argument("--start_save_model", type=int, default=20, help="saving the model")

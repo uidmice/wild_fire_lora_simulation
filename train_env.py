@@ -1,6 +1,6 @@
 import time
 import pickle, datetime, json, os
-
+from itertools import product
 import torch
 
 from config import *
@@ -59,7 +59,11 @@ class g_env:
         self.n_sensors = args.n_agents
 
         self.num_actions = 2
-        self.state_composition = {'DATA': ['PREDICTION', "BURNING", "WIND", "LOCATION"],
+        if self.args.simplified_state:
+            self.state_composition = {'DATA': ["BURNING", "WIND", "LOCATION"],
+                                      'COMM': ['SF']}
+        else:
+            self.state_composition = {'DATA': ['PREDICTION', "BURNING", "WIND", "LOCATION"],
                                   'COMM': ['SF']}
         self.obs_data_dim = sum([AGENT_STATE[feat] for feat in self.state_composition['DATA']])
         self.obs_comm_dim = sum([AGENT_STATE[feat] for feat in self.state_composition['COMM']])
@@ -207,7 +211,12 @@ class g_env:
                 a = np.random.choice(self.n_sensors)
             while a in self.bad_episodes:
                 a = np.random.choice(self.n_sensors)
-            self.environment.set_source(self.region.cell_set[a])
+            if self.args.unknown_source:
+                random_source = random.sample(list(product(range(self.environment.rows), range(self.environment.cols))),
+                                              self.environment.rows * self.environment.cols//2)
+                self.environment.set_source(random_source)
+            else:
+                self.environment.set_source(self.region.cell_set[a])
             self.environment.ground_truth, self.environment.vs, self.environment.th = pickle.load(open(f'{self.gt_data}/wind_{a}.pk', 'rb'))
             if self.args.uneven_wind:
                 self.wind_vs = self.environment.vs
@@ -304,7 +313,10 @@ class g_env:
         print(f'dead sensors: {self.dead_sensors}')
         if self.args.single_reward:
             # rewards[:, 0] *= acc + COMM_RATIO * len(send_index)/self.n_sensors
-            rewards[:, 0] *= track_acc
+            if self.args.use_tracking_acc:
+                rewards[:, 0] *= track_acc
+            else:
+                rewards[:,0] = acc
             rewards[:, 1] *= 1- len(send_index)/self.n_sensors
             print(f'reward: {np.average(rewards, axis=0)}')
         else:
@@ -400,7 +412,10 @@ class g_env:
             self.obs = np.hstack([self.obs, np.exp(-self.last_update/3).reshape((self.n_sensors, 1))])
         self.state = self.obs.flatten()
         # self.burning = np.array([self.region.get_state(i, self.I)[-1] for i in range(self.n_sensors)])
-        self.burning = self.obs[:, FUTURE_STEPS + 2].copy()
+        if self.args.simplified_state:
+            self.burning = self.obs[:, 1].copy()
+        else:
+            self.burning = self.obs[:, FUTURE_STEPS + 2].copy()
         for i in self.dead_sensors:
             self.obs[i,:] = 0
         return
@@ -415,9 +430,17 @@ class g_env:
     def get_agent_obs_data(self, i, predict_bt):
 
         s = self.region.get_state(i, self.I)
+        if self.args.simplified_state:
+            r = int(s[-1])
+            p = int(not predict_bt > 0)
+            state = [1]
+            if r != p:
+                state = [0]
+        else:
+            state = [0 for _ in range(FUTURE_STEPS + 2)]
+            state[predict_bt] = 1
 
-        state = [0 for _ in range(FUTURE_STEPS + 2)] + [s[-1]]
-        state[predict_bt] = 1
+        state = state + [s[-1]]
 
         if 'WIND' in self.state_composition['DATA']:
             state += [s[0] / max([np.max(a) for a in self.wind_vs]), s[1] / 360]
