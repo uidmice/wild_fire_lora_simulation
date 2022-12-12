@@ -37,11 +37,14 @@ def parse_args():
     parser.add_argument("--limit-observation", action='store_true')
     parser.add_argument("--uneven-wind", action='store_true')
     parser.add_argument("--mapset", default='grass')
-    parser.add_argument('--use-tracking-acc', action='store_true')
     parser.add_argument('--unknown-source', action='store_true')
     parser.add_argument('--simplified-state', action='store_true')
-    parser.add_argument("--reward-weights", type=list, default=[0.5, 0.5])
-
+    parser.add_argument("--reward-weights", type=list, default=[1, 0])
+    parser.add_argument(
+        "--data-reward",
+        choices=['acc', 'track_acc', 'correction_eff'],
+        default="acc"
+    )
     parser.add_argument(
         "--mixer",
         choices=['QMIX', 'VDN', 'NONE', 'GraphMix'],
@@ -156,7 +159,8 @@ def train(env, args, agent):
             # update the date and save experience to memory
 
             # concatenate the obs and actions_last for speed up the train
-            agent.save_memory(np.concatenate([obs, actions_last], axis=-1), state, actions.reshape(1, -1), avail_actions_new, np.concatenate([obs_new, actions_now_onehot], axis=-1),
+            if epi_step_cnt > 0:
+                agent.save_memory(np.concatenate([obs, actions_last], axis=-1), state, actions.reshape(1, -1), avail_actions_new, np.concatenate([obs_new, actions_now_onehot], axis=-1),
                      state_new, rewards, dones, done)
 
             actions_last = env.last_action

@@ -60,7 +60,7 @@ class g_env:
 
         self.num_actions = 2
         if self.args.simplified_state:
-            self.state_composition = {'DATA': ["BURNING", "WIND", "LOCATION"],
+            self.state_composition = {'DATA': ["BURNING", "BURNING", "WIND", "LOCATION"],
                                       'COMM': ['SF']}
         else:
             self.state_composition = {'DATA': ['PREDICTION', "BURNING", "WIND", "LOCATION"],
@@ -114,6 +114,8 @@ class g_env:
         self.communication.reset()
 
         self.dead_sensors = set()
+        self.burning = np.zeros(self.n_sensors)
+
 
         self.I = 0
         self.eps = 0
@@ -129,13 +131,15 @@ class g_env:
         dir_name = '{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), SF, args.run)
         if  hasattr(args, 'mixer') and args.run in ["QMIX", 'GNNQmix']:
             dir_name = dir_name + f'_{args.mixer}'
-
-        if args.double_q:
-            dir_name = dir_name + f'_dq'
+            if args.double_q:
+                dir_name = dir_name + f'_dq'
+            if args.simplified_state:
+                dir_name = dir_name + '_simplified'
+            dir_name = dir_name + '_' + self.args.data_reward
         dir_name = dir_name + f'_{syn}'
 
-        if self.args.alternating_wind:
-            dir_name = dir_name + f'_alter{args.alternating_wind}'
+        # if self.args.alternating_wind:
+        #     dir_name = dir_name + f'_alter{args.alternating_wind}'
         if args.suffix:
             dir_name = dir_name + f'_{args.suffix}'
 
@@ -235,7 +239,9 @@ class g_env:
             'burning_state': [],
             'sf': [],
             'update_time': [],
-            'predict_time': []
+            'predict_time': [],
+            'number_corrected': [],
+            'correction_eff': []
         }
         # if self.args.alternating_wind:
         #     self.environment.generate_wildfire_alternate(self.T+FUTURE_STEPS*self.step_size, self.step_size*self.args.alternating_wind, spotting=self.spotting)
@@ -243,6 +249,7 @@ class g_env:
         #     self.environment.generate_wildfire(self.T+FUTURE_STEPS*self.step_size, spotting=self.spotting)
         self.dead_sensors = set()
         self.fb = [FUTURE_STEPS + 1 for _ in range(self.n_sensors)]
+
         self._obs(self.fb)
         self.last_p = np.zeros(self.n_sensors)
         self.last_p[a] = 1
@@ -282,14 +289,10 @@ class g_env:
 
             predict, b = self.region.predict(
                 'predict', self.I, step_size, 'predict', spotting=self.spotting)
-        # on_fire = self.environment.get_on_fire(self.I)
-        # acc = 1 - np.sum(abs(on_fire - predict))/(self.region.cols*self.region.rows)
 
         for i in range(self.n_sensors):
             if self.burning[i] and np.random.random() < 0:
                 self.dead_sensors.add(i)
-        # diff = np.absolute(self.burning - self.last_p)
-        # acc = 1 - np.dot(diff, np.array(self.region.area)/np.sum(self.region.area))
 
         burning_cell = self.environment.get_on_fire(self.I)
         diff = np.absolute(burning_cell - self.last_p_cell)
@@ -303,6 +306,13 @@ class g_env:
 
         self.disregard_area = np.where(burning_cell * self.last_p_cell + self.disregard_area > 0, 1, 0)
 
+        correction_eff = 0.5
+        require_correction = set(np.where(self.burning != self.last_p)[0])
+
+        if len(require_correction):
+            # assert set(corrected).issubset(require_correction), 'something wrong'
+            # correction_eff = len(corrected)/len(require_correction)
+            correction_eff = len(corrected)/10
 
         rewards = np.ones((self.n_sensors, 2))
         print(f' # of sent: {len(send_index)}')
@@ -310,14 +320,17 @@ class g_env:
         print(f'Predict area: {np.sum(self.last_p)}')
         print(f'Burning area: {np.sum(self.burning)}')
         print(f'accuracy: {acc} ')
+        print(f'correction eff: {correction_eff} ')
         print(f'dead sensors: {self.dead_sensors}')
         if self.args.single_reward:
             # rewards[:, 0] *= acc + COMM_RATIO * len(send_index)/self.n_sensors
-            if self.args.use_tracking_acc:
-                rewards[:, 0] *= track_acc
+            if self.args.data_reward == 'track_acc':
+                rewards[:, 0] = track_acc
+            elif self.args.data_reward == 'acc':
+                rewards[:, 0] = acc
             else:
-                rewards[:,0] = acc
-            rewards[:, 1] *= 1- len(send_index)/self.n_sensors
+                rewards[:, 0] = correction_eff
+            rewards[:, 1] = 1- len(send_index)/self.n_sensors
             print(f'reward: {np.average(rewards, axis=0)}')
         else:
             diff_p = np.absolute(self.burning - self.last_p)
@@ -339,8 +352,6 @@ class g_env:
                         rewards[i, 0] = 0
             print(f'reward: {np.average(rewards, axis=0)}\n {rewards[:,0]}\n {rewards[:,1]} ')
 
-
-
         fb = (FUTURE_STEPS + 1 - np.sum(future_b, axis=0)).tolist()
         if self.args.synchronous or self.I == 0:
             self.fb = fb
@@ -359,10 +370,11 @@ class g_env:
         if ca <= 0:
             done = True
 
-        # done = False
+        # done = Falsex
         dones = np.ones(self.n_sensors) * done
         for n in self.dead_sensors:
             dones[n] = 1
+
 
         self.records['sent'].append(len(send_index))
         self.records['received'].append(len(received))
@@ -374,10 +386,13 @@ class g_env:
         self.records['rewards_nodes'].append(rewards)
         self.records['burning_state'].append(self.burning.copy())
         self.records['sf'].append([self.communication.get_sensor_para(i)[1] for i in range(self.n_sensors)])
-        self.records['update_time'].append(t1 - start)
-        self.records['predict_time'].append(t2 - t1)
-        self.records['last_status_cell'] = burning_cell
-        self.records['last_predict_cell'] = self.last_p_cell
+        self.records['number_corrected'].append(len(corrected))
+        self.records['correction_eff'].append(correction_eff)
+        # self.records['update_time'].append(t1 - start)
+        # self.records['predict_time'].append(t2 - t1)
+
+        # self.records['last_status_cell'] = burning_cell
+        # self.records['last_predict_cell'] = self.last_p_cell
 
 
 
@@ -387,6 +402,7 @@ class g_env:
         self.last_action = np.eye(self.num_actions)[actions]
 
         self._obs(self.fb)
+
         if self.args.visualize:
             infos = {'burning': burning_cell, 'predict': self.last_p_cell.copy(), 'received': received, 'sent': send_index,
                      'disregard': self.disregard_area.copy()}
@@ -411,11 +427,10 @@ class g_env:
         if not self.args.synchronous:
             self.obs = np.hstack([self.obs, np.exp(-self.last_update/3).reshape((self.n_sensors, 1))])
         self.state = self.obs.flatten()
-        # self.burning = np.array([self.region.get_state(i, self.I)[-1] for i in range(self.n_sensors)])
         if self.args.simplified_state:
-            self.burning = self.obs[:, 1].copy()
+            self.burning[:] = self.obs[:, 1]
         else:
-            self.burning = self.obs[:, FUTURE_STEPS + 2].copy()
+            self.burning[:] = self.obs[:, FUTURE_STEPS + 2]
         for i in self.dead_sensors:
             self.obs[i,:] = 0
         return

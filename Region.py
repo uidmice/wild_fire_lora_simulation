@@ -58,7 +58,7 @@ class Region:
         }
         self.idx = 0
         self.history = 0
-
+        print(gs.verbosity())
 
     def model_update(self, received, time, source_name, suffix=''):
         predict = raster.raster2numpy(source_name).astype('int32')
@@ -103,7 +103,8 @@ class Region:
                 wrong_cells = set(zip(t[0], t[1]))
                 whole_cells = self.cell_set[i]
                 assert wrong_cells.issubset(whole_cells)
-                random_set = set(random.sample(list(wrong_cells),  len(wrong_cells)-n))
+                random_set = wrong_cells
+                # random_set = set(random.sample(list(wrong_cells),  len(wrong_cells)-n))
                 for c in random_set:
                     predict[c[0], c[1]] = 0
                 corrected.append(i)

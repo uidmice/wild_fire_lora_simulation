@@ -30,6 +30,7 @@ def grass_init(gisdb, location, mapset):
     gs.message("Current GRASS GIS 8 environment:")
     print(gs.gisenv())
     script.run_command('g.gisenv', set="DEBUG=0")
+    print(gs.verbosity())
 
     return cfile
 
