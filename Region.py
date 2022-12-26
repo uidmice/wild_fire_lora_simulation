@@ -3,7 +3,7 @@ import random
 from itertools import product
 from framework.GRASS import *
 
-OBSERVATION_RANGE = 2
+OBSERVATION_RANGE = 12
 
 class Region:
     def __init__(self, node_indices, env, logdir, args, subregion_fire_percent=0.5):
@@ -58,15 +58,12 @@ class Region:
         }
         self.idx = 0
         self.history = 0
-        print(gs.verbosity())
 
     def model_update(self, received, time, source_name, suffix=''):
         predict = raster.raster2numpy(source_name).astype('int32')
         p = np.where((predict <= time) & (predict > 0), 1, 0)
 
-        predict_state = [np.sum(p * self.masks[i])>= self.fire_threshold[i] for i in range(self.n_points)]
-        # rast = raster.RasterSegment(source_name)
-        # rast.open('rw', overwrite=True)
+        predict_state = self.subregion_firing(p)
         corrected = []
 
         for i in received:
@@ -144,18 +141,12 @@ class Region:
         return pre, b
 
     def subregion_firing(self, firing_state):
-        burning_a = []
-        for ma in self.masks:
-            masked = firing_state * ma
-            burning_a.append(np.sum(masked))
-        # burning_a = [np.sum(firing_state * ma) for ma in self.masks]
-        burning = [int(a > am) for a, am in zip(burning_a, self.fire_threshold)]
-        return burning
+        return np.array([int(np.sum(firing_state * self.masks[i])> self.fire_threshold[i]) for i in range(self.n_points)])
+
 
     def get_state(self, idx, time):
         sensed = self.env.sense_region(self.point_set[idx][0], self.point_set[idx][1], self.masks[idx], time)
-        n = int(self.area[idx] * 0.5)
-        return  [sensed['vs'], sensed['th'], int(sensed['fire_area'] >= n)]
+        return  [sensed['vs'], sensed['th'], int(sensed['fire_area'] >= self.fire_threshold[idx])]
 
 
 

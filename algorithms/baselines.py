@@ -45,6 +45,9 @@ class Heuristic_Agent(Base_Agent):
     def select_actions(self, avail_actions, *args, **kwargs):
         fb = kwargs['fb']
         burning = kwargs['burning']
+        print(fb)
+        print(burning)
+
         if not fb:
             return np.array([0 for _ in range(len(avail_actions))])
 

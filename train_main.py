@@ -33,6 +33,7 @@ def parse_args():
     parser.add_argument("--spotting", action="store_true")
     parser.add_argument("--wind-step-size", type=int, default=120)
     parser.add_argument("--disable-single-reward", dest='single_reward', action='store_false')
+    parser.add_argument('--disable-prediction', action='store_true')
     parser.add_argument("--synchronous", action='store_true')
     parser.add_argument("--limit-observation", action='store_true')
     parser.add_argument("--uneven-wind", action='store_true')
@@ -61,7 +62,7 @@ def parse_args():
     # environment
     parser.add_argument("--seed", type=int, default=123456)
     parser.add_argument("--visualize", action='store_true')
-    parser.add_argument("--save_dir", type=str, default="results_new/new_env_120", help="model should be saved")
+    parser.add_argument("--save_dir", type=str, default="results_new/new_env_120_2ch", help="model should be saved")
     parser.add_argument("--suffix", type=str)
     parser.add_argument("--per_episode_max_len", type=int, default=30, help="maximum episode length")
     parser.add_argument("--max_episode", type=int, default=1000, help="maximum episode length")
@@ -292,7 +293,7 @@ if __name__ == '__main__':
     # args.n_agents = 5
     # args.visualize = True
     # args.wind_step_size = 30
-    # args.learning_start_episode = 1
+    args.learning_start_episode = 1
     # args.per_episode_max_len = 3
     # args.learning_fre = 2
     # args.mixer = 'GraphMix'

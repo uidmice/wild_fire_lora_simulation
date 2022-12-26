@@ -181,7 +181,7 @@ class Environment:
         return {'vs': self.vs[row, col], 'th': self.th[row, col], 'fire': self.ground_truth[row, col] < time}
 
     def sense_region(self, row, col, mask, time):
-        firing = np.where ((self.ground_truth <= time) & (self.ground_truth > 0), 1, 0)
+        firing = self.get_on_fire(time)
         masked_result = firing * mask
         if self.uneven_wind:
             return {'vs': self.vs[(time//self.step_size)][row, col], 'th': self.th[(time//self.step_size)][row, col], 'fire_area': np.sum(masked_result), 'firing': masked_result}
