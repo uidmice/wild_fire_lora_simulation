@@ -40,7 +40,7 @@ def parse_args():
     parser.add_argument("--mapset", default='grass')
     parser.add_argument('--unknown-source', action='store_true')
     parser.add_argument('--simplified-state', action='store_true')
-    parser.add_argument("--reward-weights", type=list, default=[1, 0])
+    parser.add_argument("--reward-weights", type=list, default=[0.5, 0.5])
     parser.add_argument(
         "--data-reward",
         choices=['acc', 'track_acc', 'correction_eff'],
@@ -62,7 +62,7 @@ def parse_args():
     # environment
     parser.add_argument("--seed", type=int, default=123456)
     parser.add_argument("--visualize", action='store_true')
-    parser.add_argument("--save_dir", type=str, default="results_new/new_env_120_2ch", help="model should be saved")
+    parser.add_argument("--save_dir", type=str, default="results_new/new_env_60_2ch", help="model should be saved")
     parser.add_argument("--suffix", type=str)
     parser.add_argument("--per_episode_max_len", type=int, default=30, help="maximum episode length")
     parser.add_argument("--max_episode", type=int, default=1000, help="maximum episode length")
@@ -293,13 +293,13 @@ if __name__ == '__main__':
     # args.n_agents = 5
     # args.visualize = True
     # args.wind_step_size = 30
-    args.learning_start_episode = 1
+    # args.learning_start_episode = 1
     # args.per_episode_max_len = 3
     # args.learning_fre = 2
     # args.mixer = 'GraphMix'
     # args.double_q = True
     # args.run= "HEURISTIC2"
-    # args.batch_size = 2
+    # args.batch_size = 3
     # args.fre4save_model = 3
 
     if args.device == 'cuda' and not torch.cuda.is_available():

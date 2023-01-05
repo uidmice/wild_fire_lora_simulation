@@ -394,9 +394,8 @@ class g_env:
                         if self.fb[node] > 0:
                             self.fb[node] -= 1
 
-        done = (np.sum(self.burning) > 0.5 * self.n_sensors) and (self.I > 10*self.step_size)
-        if np.sum(ca) <= 0:
-            done = True
+        done = (np.sum(self.burning) > 0.5 * self.n_sensors) and (self.I > 10*self.step_size) and (np.sum(ca) <= 0)
+
 
         dones = np.ones(self.n_sensors) * done
         for n in self.dead_sensors:
